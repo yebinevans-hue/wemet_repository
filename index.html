@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"/>
+  <title>WeMet</title>
+  <meta name="theme-color" content="#1e293b"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="WeMet"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png"/>
+  <link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+  <link rel="manifest" href="/manifest.json"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    html,body{height:100%;background:#f0f2f5;}
+    body{font-family:'Inter',system-ui,sans-serif;}
+    #root{min-height:100dvh;padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef} = React;
+
+const uid = () => Math.random().toString(36).slice(2,8);
+const PALETTE = ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#ec4899","#0ea5e9","#14b8a6"];
+const todayStr = () => new Date().toISOString().slice(0,10);
+const fmtDate  = (s) => { if(!s)return""; const p=s.split("-"); return p[0].slice(2)+"."+p[1]+"."+p[2]; };
+const fmtYYMM  = (ts) => { const d=new Date(ts||Date.now()); return String(d.getFullYear()).slice(2)+"."+String(d.getMonth()+1).padStart(2,"0"); };
+const N = Date.now();
+const MAX_FILE = 1.5*1024*1024;
+const MTYPES = ["대면 미팅","비대면 미팅","통화","기타"];
+const MCOLORS = {"대면 미팅":"#ef4444","비대면 미팅":"#22c55e","통화":"#eab308","기타":"#a855f7"};
+const mtCol = (m) => (m&&MCOLORS[m.meetingType])||null;
+
+const NOTE_FIELDS = [
+  {key:"preferences",label:"❤️ 취향",ph:"음식, 취미..."},
+  {key:"personality",label:"🧠 성향",ph:"MBTI, 성격..."},
+  {key:"skills",label:"⚡ 스킬",ph:"전문 기술, 강점..."},
+  {key:"role",label:"🎯 실질적 역할",ph:"실제 포지션..."},
+  {key:"interests",label:"💡 사업 관심사",ph:"관심 분야..."},
+  {key:"pastTitles",label:"🗂️ 예전 직함",ph:"전 직장, 이전 포지션..."},
+];
+const emptyNotes = () => ({preferences:"",personality:"",skills:"",role:"",interests:"",pastTitles:"",relationStart:todayStr(),projects:"",memo:"",custom:[]});
+
+function autoColor(org,job,isDirect,gCount) {
+  const o=org||"",j=job||"";
+  if(j.includes("교수")||o.includes("대학교")) return "#8b5cf6";
+  if(o.includes("이씨오")) return "#0ea5e9";
+  if(gCount>=3) return "#ef4444";
+  if(!isDirect) return "#f59e0b";
+  if(o.trim()) return "#14b8a6";
+  return PALETTE[0];
+}
+
+const IP=[
+  {id:"p1",name:"김민준",job:"프론트 리드",dept:"개발팀",org:"카카오",contact:"",isDirectContact:true,notes:Object.assign(emptyNotes(),{skills:"React, AWS"}),relatedPeople:["p2"],intimacy:4,workImportance:5,date:"2024-01-15",groups:["g1"],color:"#14b8a6",createdAt:N-500000,updatedAt:N-50000},
+  {id:"p2",name:"이서연",job:"UX 디자이너",dept:"",org:"카카오",contact:"",isDirectContact:true,notes:Object.assign(emptyNotes(),{skills:"Figma"}),relatedPeople:["p1"],intimacy:3,workImportance:4,date:"2024-02-20",groups:["g1","g2"],color:"#14b8a6",createdAt:N-400000,updatedAt:N-80000},
+  {id:"p3",name:"박도현",job:"PM",dept:"",org:"스타트업 A",contact:"",isDirectContact:false,notes:emptyNotes(),relatedPeople:[],intimacy:3,workImportance:4,date:"2024-03-10",groups:["g2"],color:"#f59e0b",createdAt:N-300000,updatedAt:N-120000},
+];
+const IG=[
+  {id:"g1",name:"개발팀",color:PALETTE[0],members:["p1","p2"],desc:"",startDate:"",endDate:"",history:[],createdAt:N-600000},
+  {id:"g2",name:"파트너",color:PALETTE[2],members:["p2","p3"],desc:"",startDate:"",endDate:"",history:[],createdAt:N-500000},
+];
+const IC=[{id:"c1",from:"p1",to:"p2",reason:"전 직장 동료",createdAt:N-300000}];
+const IM=[
+  {id:"m1",meetingType:"대면 미팅",location:"카카오 본사",date:"2026-03-10",time:"14:00",project:"앱 런칭 기획",relatedProjects:["g1"],attendees:["p1","p2"],memo:"MVP 기능 확정",rating:4,materialsToSend:"",nextContactDate:"",insights:"",nextKeywords:"",filesMeta:[],createdAt:N-300000},
+  {id:"m2",meetingType:"통화",location:"",date:"2026-03-13",time:"10:00",project:"투자 라운드",relatedProjects:[],attendees:["p3"],memo:"시드 5억 목표",rating:3,materialsToSend:"",nextContactDate:"",insights:"",nextKeywords:"",filesMeta:[],createdAt:N-200000},
+];
+const IORGS=["카카오","네이버","스타트업 A"];
+const ILOCS=["카카오 본사","회사 회의실","스타벅스 강남점"];
+
+const getSB=()=>{const u=localStorage.getItem("sb-url"),k=localStorage.getItem("sb-key");return u&&k?{url:u,key:k}:null;};
+const sbH=(k)=>({"apikey":k,"Authorization":"Bearer "+k,"Content-Type":"application/json"});
+const storage={
+  get:async(k)=>{const sb=getSB();if(sb){try{const r=await fetch(sb.url+"/rest/v1/kv_store?key=eq."+encodeURIComponent(k)+"&select=value",{headers:sbH(sb.key),cache:"no-store"});const d=await r.json();if(d&&d[0])return{value:d[0].value};}catch(e){}}const v=localStorage.getItem(k);return v?{value:v}:null;},
+  set:async(k,v)=>{const sb=getSB();if(sb){try{await fetch(sb.url+"/rest/v1/kv_store",{method:"POST",headers:Object.assign({},sbH(sb.key),{"Prefer":"resolution=merge-duplicates"}),body:JSON.stringify({key:k,value:v,updated_at:new Date().toISOString()})});}catch(e){}}localStorage.setItem(k,v);return true;},
+  del:async(k)=>{const sb=getSB();if(sb){try{await fetch(sb.url+"/rest/v1/kv_store?key=eq."+encodeURIComponent(k),{method:"DELETE",headers:sbH(sb.key)});}catch(e){}}localStorage.removeItem(k);return true;},
+  test:async(url,key)=>{try{const r=await fetch(url+"/rest/v1/kv_store?limit=1",{headers:sbH(key)});return r.ok;}catch(e){return false;}}
+};
+
+const getAlerts=(meetings)=>{
+  const today=todayStr(),d2=new Date();d2.setDate(d2.getDate()+1);const tmr=d2.toISOString().slice(0,10);
+  return(meetings||[]).filter(m=>m.date===today||m.date===tmr).map(m=>({m,label:m.date===today?"오늘":"내일"})).sort((a,b)=>(a.m.time||"").localeCompare(b.m.time||""));
+};
+const fireNotifs=async(meetings)=>{
+  if(!("Notification" in window)||Notification.permission!=="granted")return;
+  const today=todayStr(),d2=new Date();d2.setDate(d2.getDate()+1);const tmr=d2.toISOString().slice(0,10);
+  (meetings||[]).forEach(m=>{const type=m.date===today?"today":m.date===tmr?"tomorrow":null;if(!type)return;const key="nf-"+m.id+"-"+type;if(localStorage.getItem(key))return;localStorage.setItem(key,"1");new Notification(type==="today"?"📅 오늘 미팅":"🔔 내일 미팅 예정",{body:(m.time?m.time+" ":"")+m.project,icon:"/icons/icon-192.png"});});
+};
+
+const SQL_HINT=`create table kv_store (
+  key text primary key,
+  value text,
+  updated_at timestamptz default now()
+);
+alter table kv_store enable row level security;
+create policy allow_all on kv_store
+  for all using (true) with check (true);`;
+
+// ── 공통 UI ────────────────────────────────────────────
+const Modal=({title,onClose,children,wide,widePx})=>(
+  <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
+    <div style={{background:"#fff",borderRadius:16,padding:22,width:widePx||(wide?660:450),maxWidth:"95vw",maxHeight:"92dvh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.22)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <span style={{fontWeight:700,fontSize:15}}>{title}</span>
+        <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#94a3b8",lineHeight:1}}>×</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+const ConfirmDel=({label,onConfirm,onCancel})=>(
+  <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400}}>
+    <div style={{background:"#fff",borderRadius:16,padding:28,width:320,maxWidth:"88vw",boxShadow:"0 20px 60px rgba(0,0,0,0.25)",textAlign:"center"}}>
+      <div style={{fontSize:32,marginBottom:12}}>🗑️</div>
+      <div style={{fontWeight:700,fontSize:15,marginBottom:6}}>정말로 삭제하시겠습니까?</div>
+      {label&&<div style={{fontSize:12,color:"#64748b",marginBottom:18}}>"{label}"을(를) 삭제합니다.<br/>이 작업은 되돌릴 수 없습니다.</div>}
+      {!label&&<div style={{fontSize:12,color:"#64748b",marginBottom:18}}>이 작업은 되돌릴 수 없습니다.</div>}
+      <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+        <button onClick={onCancel} style={{padding:"9px 24px",borderRadius:8,border:"1px solid #e2e8f0",background:"#f1f5f9",cursor:"pointer",fontSize:13,fontWeight:600,color:"#475569"}}>아니오</button>
+        <button onClick={onConfirm} style={{padding:"9px 24px",borderRadius:8,border:"none",background:"#ef4444",cursor:"pointer",fontSize:13,fontWeight:600,color:"#fff"}}>예, 삭제</button>
+      </div>
+    </div>
+  </div>
+);
+
+const Lbl=({c,mt=10})=><div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:3,marginTop:mt,textTransform:"uppercase",letterSpacing:.4}}>{c}</div>;
+const Inp=({s,...r})=><input {...r} style={Object.assign({width:"100%",padding:"8px 11px",borderRadius:7,border:"1px solid #e2e8f0",fontSize:13,outline:"none",boxSizing:"border-box"},s||{})}/>;
+const TA=({rows=2,s,...r})=><textarea {...r} rows={rows} style={Object.assign({width:"100%",padding:"8px 11px",borderRadius:7,border:"1px solid #e2e8f0",fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit"},s||{})}/>;
+const Btn=({v="primary",s,children,...r})=>{const bg=v==="danger"?"#fef2f2":v==="green"?"#0f766e":v==="secondary"?"#f1f5f9":"#1e293b";const cl=v==="danger"?"#ef4444":v==="green"?"#fff":v==="secondary"?"#475569":"#fff";return <button {...r} style={Object.assign({padding:"7px 14px",borderRadius:7,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:bg,color:cl},s||{})}>{children}</button>;};
+const Pal=({value,onChange})=>(<div style={{display:"flex",gap:5,marginTop:4,flexWrap:"wrap"}}>{PALETTE.map(c=><div key={c} onClick={()=>onChange(c)} style={{width:22,height:22,borderRadius:"50%",background:c,cursor:"pointer",outline:value===c?"3px solid #1e293b":"3px solid transparent",outlineOffset:2}}/>)}</div>);
+const Av=({p,size=30})=>{if(!p)return null;return <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}><div style={{width:size,height:size,borderRadius:"50%",background:p.color||"#94a3b8",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:size*.42}}>{(p.name||"?")[0]}</div><span style={{fontSize:9,fontWeight:600,color:"#475569"}}>{p.name}</span></div>;};
+const Stars=({value,onChange,label})=>(<div><Lbl c={label}/><div style={{display:"flex",gap:2,marginTop:3}}>{[1,2,3,4,5].map(n=><span key={n} onClick={()=>onChange(n===value?0:n)} style={{fontSize:24,cursor:"pointer",color:n<=value?"#f59e0b":"#e2e8f0",lineHeight:1}}>★</span>)}</div></div>);
+const Scale5=({value,onChange,label})=>(<div><Lbl c={label} mt={6}/><div style={{display:"flex",gap:3,marginTop:3}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>onChange(n)} style={{width:28,height:28,borderRadius:6,border:"1px solid "+(n<=value?"#6366f1":"#e2e8f0"),cursor:"pointer",fontSize:11,fontWeight:700,background:n<=value?"#6366f1":"#fff",color:n<=value?"#fff":"#94a3b8"}}>{n}</button>)}</div></div>);
+const Sec=({c})=>(<div style={{display:"flex",alignItems:"center",gap:8,margin:"14px 0 4px"}}><span style={{fontSize:11,fontWeight:700,color:"#334155",whiteSpace:"nowrap"}}>{c}</span><div style={{flex:1,height:1,background:"#f1f5f9"}}/></div>);
+
+const IPeopleIcon=({a})=>{const c=a?"#fff":"#94a3b8";return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="7" r="3.5" fill={c}/><path d="M2 19c0-3.314 3.134-6 7-6s7 2.686 7 6" stroke={c} strokeWidth="2" strokeLinecap="round" fill="none"/><circle cx="17" cy="8" r="2.5" fill={c} opacity=".7"/><path d="M19 19c0-2.21-1.79-4-4-4" stroke={c} strokeWidth="2" strokeLinecap="round" fill="none" opacity=".7"/></svg>;};
+const IProjectIcon=({a})=>{const c=a?"#fff":"#94a3b8";return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" fill={c}/><rect x="14" y="3" width="7" height="7" rx="1.5" fill={c} opacity=".7"/><rect x="3" y="14" width="7" height="7" rx="1.5" fill={c} opacity=".7"/><rect x="14" y="14" width="7" height="7" rx="1.5" fill={c}/></svg>;};
+const IConnectIcon=({a})=>{const c=a?"#fff":"#94a3b8";return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" stroke={c} strokeWidth="2.2" strokeLinecap="round" fill="none"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" stroke={c} strokeWidth="2.2" strokeLinecap="round" fill="none"/></svg>;};
+const IMeetIcon=({a})=>{const c=a?"#fff":"#94a3b8";return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2.5" stroke={c} strokeWidth="2" fill="none"/><path d="M16 2v4M8 2v4M3 9h18" stroke={c} strokeWidth="2" strokeLinecap="round"/><circle cx="8" cy="14" r="1.2" fill={c}/><circle cx="12" cy="14" r="1.2" fill={c}/><circle cx="16" cy="14" r="1.2" fill={c}/><circle cx="8" cy="18" r="1.2" fill={c}/><circle cx="12" cy="18" r="1.2" fill={c}/></svg>;};
+const StatIllust=({type})=>{if(type==="people")return <span style={{fontSize:30}}>🤝</span>;if(type==="project")return <span style={{fontSize:30}}>💡</span>;if(type==="connect")return <span style={{fontSize:30}}>🔗</span>;return <span style={{fontSize:30}}>📅</span>;};
+const TabBtn=({label,active,onClick,Icon})=>(<button onClick={onClick} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"5px 8px",borderRadius:10,border:"none",cursor:"pointer",background:active?"#1e293b":"transparent",minWidth:50,flexShrink:0}}><Icon a={active}/><span style={{fontSize:9,fontWeight:600,color:active?"#fff":"#94a3b8",lineHeight:1,whiteSpace:"nowrap"}}>{label}</span></button>);
+
+function useWide(){
+  const[w,setW]=useState(()=>window.innerWidth>=768);
+  useEffect(()=>{
+    const h=()=>setW(window.innerWidth>=768);
+    window.addEventListener("resize",h);
+    window.addEventListener("orientationchange",h);
+    return()=>{window.removeEventListener("resize",h);window.removeEventListener("orientationchange",h);};
+  },[]);
+  return w;
+}
+function useDD(){const[open,setOpen]=useState(false);const ref=useRef(null);useEffect(()=>{const h=(e)=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener("mousedown",h);return()=>document.removeEventListener("mousedown",h);},[]);return[open,setOpen,ref];}
+
+function SettingsModal({onClose}){
+  const[url,setUrl]=useState(localStorage.getItem("sb-url")||"");
+  const[key,setKey]=useState(localStorage.getItem("sb-key")||"");
+  const[st,setSt]=useState(null);
+  const test=async()=>{setSt("t");setSt(await storage.test(url.trim(),key.trim())?"ok":"fail");};
+  const save=()=>{localStorage.setItem("sb-url",url.trim());localStorage.setItem("sb-key",key.trim());onClose();window.location.reload();};
+  const clear=()=>{localStorage.removeItem("sb-url");localStorage.removeItem("sb-key");setUrl("");setKey("");setSt(null);};
+  return(
+    <Modal title="⚙️ Supabase 동기화 설정" onClose={onClose}>
+      <div style={{fontSize:12,color:"#64748b",lineHeight:1.7,background:"#f8fafc",borderRadius:8,padding:"10px 12px",marginBottom:14}}>
+        <b>설정 방법</b><br/>1. <a href="https://supabase.com" target="_blank" style={{color:"#6366f1"}}>supabase.com</a> 무료 프로젝트 생성<br/>
+        2. SQL 에디터에서 아래 쿼리 실행:<br/>
+        <pre style={{background:"#e2e8f0",padding:"6px 8px",borderRadius:5,margin:"5px 0",fontSize:11,whiteSpace:"pre-wrap"}}>{SQL_HINT}</pre>
+        3. Settings → API 에서 URL과 anon key 복사
+      </div>
+      <Lbl c="Project URL" mt={4}/><Inp value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co"/>
+      <Lbl c="anon key"/><Inp value={key} onChange={e=>setKey(e.target.value)} s={{fontFamily:"monospace",fontSize:11}} placeholder="eyJ..."/>
+      {st&&<div style={{marginTop:8,fontSize:12,fontWeight:600,color:st==="ok"?"#10b981":st==="fail"?"#ef4444":"#f59e0b"}}>{st==="t"?"⏳ 테스트 중...":st==="ok"?"✅ 연결 성공!":"❌ 연결 실패"}</div>}
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:16}}>
+        <div>{localStorage.getItem("sb-url")&&<Btn v="danger" onClick={clear}>연결 해제</Btn>}</div>
+        <div style={{display:"flex",gap:8}}><Btn v="secondary" onClick={onClose}>취소</Btn><Btn v="secondary" s={{color:"#6366f1"}} onClick={test} disabled={!url||!key}>테스트</Btn><Btn onClick={save} disabled={!url||!key}>저장 & 재시작</Btn></div>
+      </div>
+    </Modal>
+  );
+}
+
+function OrgCombo({value,onChange,orgs}){
+  const[input,setInput]=useState(value||"");const[open,setOpen,ref]=useDD();
+  useEffect(()=>setInput(value||""),[value]);
+  const list=input?(orgs||[]).filter(o=>o.toLowerCase().includes(input.toLowerCase())&&o!==input):(orgs||[]);
+  const sel=(v)=>{setInput(v);onChange(v);setOpen(false);};
+  return(
+    <div ref={ref} style={{position:"relative"}}>
+      <div style={{display:"flex"}}>
+        <input value={input} onChange={e=>{setInput(e.target.value);onChange(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} placeholder="직접 입력 또는 선택" style={{flex:1,padding:"8px 11px",borderRadius:"7px 0 0 7px",border:"1px solid #e2e8f0",borderRight:"none",fontSize:13,outline:"none"}}/>
+        <button type="button" onClick={()=>setOpen(o=>!o)} style={{padding:"0 9px",border:"1px solid #e2e8f0",borderRadius:"0 7px 7px 0",background:"#f8fafc",cursor:"pointer",fontSize:11,color:"#64748b"}}>{open?"▲":"▼"}</button>
+      </div>
+      {open&&list.length>0&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",maxHeight:150,overflowY:"auto",marginTop:2}}>
+        {list.map(o=><div key={o} onMouseDown={()=>sel(o)} style={{padding:"8px 12px",fontSize:13,cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>🏢 {o}</div>)}
+        {input.trim()&&!(orgs||[]).includes(input.trim())&&<div onMouseDown={()=>sel(input.trim())} style={{padding:"8px 12px",fontSize:13,cursor:"pointer",color:"#6366f1",fontWeight:600,borderTop:"1px solid #f1f5f9"}} onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>+ "{input.trim()}" 추가</div>}
+      </div>}
+    </div>
+  );
+}
+
+function LocCombo({value,onChange,locations}){
+  const[input,setInput]=useState(value||"");const[open,setOpen,ref]=useDD();
+  useEffect(()=>setInput(value||""),[value]);
+  const list=input?(locations||[]).filter(l=>l.toLowerCase().includes(input.toLowerCase())&&l!==input):(locations||[]);
+  const sel=(v)=>{setInput(v);onChange(v);setOpen(false);};
+  return(
+    <div ref={ref} style={{position:"relative"}}>
+      <div style={{display:"flex"}}>
+        <input value={input} onChange={e=>{setInput(e.target.value);onChange(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} placeholder="장소 직접 입력 또는 선택" style={{flex:1,padding:"8px 11px",borderRadius:"7px 0 0 7px",border:"1px solid #e2e8f0",borderRight:"none",fontSize:13,outline:"none"}}/>
+        <button type="button" onClick={()=>setOpen(o=>!o)} style={{padding:"0 9px",border:"1px solid #e2e8f0",borderRadius:"0 7px 7px 0",background:"#f8fafc",cursor:"pointer",fontSize:11,color:"#64748b"}}>{open?"▲":"▼"}</button>
+      </div>
+      {open&&(list.length>0||(input.trim()&&!(locations||[]).includes(input.trim())))&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",maxHeight:150,overflowY:"auto",marginTop:2}}>
+        {list.map(l=><div key={l} onMouseDown={()=>sel(l)} style={{padding:"8px 12px",fontSize:13,cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>📍 {l}</div>)}
+        {input.trim()&&!(locations||[]).includes(input.trim())&&<div onMouseDown={()=>sel(input.trim())} style={{padding:"8px 12px",fontSize:13,cursor:"pointer",color:"#6366f1",fontWeight:600,borderTop:list.length?"1px solid #f1f5f9":"none"}} onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>+ "{input.trim()}" 추가</div>}
+      </div>}
+    </div>
+  );
+}
+
+function TimePicker({value,onChange}){
+  const parts=(value||"09:00").split(":");
+  const hh=parts[0]||"09";const mm=parts[1]||"00";
+  const hours=Array.from({length:15},(_,i)=>String(i+9).padStart(2,"0"));
+  const mins=["00","10","20","30","40","50"];
+  const ss={padding:"8px 10px",borderRadius:7,border:"1px solid #e2e8f0",fontSize:13,outline:"none",background:"#fff",cursor:"pointer",flex:1,appearance:"none",WebkitAppearance:"none"};
+  return(
+    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+      <select value={hh} onChange={e=>onChange(e.target.value+":"+mm)} style={ss}>{hours.map(h=><option key={h} value={h}>{h}시</option>)}</select>
+      <span style={{fontSize:13,color:"#94a3b8",flexShrink:0,fontWeight:600}}>:</span>
+      <select value={mins.includes(mm)?mm:"00"} onChange={e=>onChange(hh+":"+e.target.value)} style={ss}>{mins.map(m=><option key={m} value={m}>{m}분</option>)}</select>
+    </div>
+  );
+}
+
+function GroupCombo({selected,onChange,groups,onCreateGroup}){
+  const[q,setQ]=useState("");const[open,setOpen,ref]=useDD();
+  const unsel=(groups||[]).filter(g=>!selected.includes(g.id));
+  const fil=q?unsel.filter(g=>g.name.includes(q)):unsel;
+  const selG=selected.map(id=>(groups||[]).find(g=>g.id===id)).filter(Boolean);
+  const add=(id)=>{onChange([...selected,id]);setQ("");setOpen(false);};
+  const remove=(id)=>onChange(selected.filter(x=>x!==id));
+  const create=()=>{if(!q.trim())return;const ng=onCreateGroup(q.trim());onChange([...selected,ng.id]);setQ("");setOpen(false);};
+  return(
+    <div ref={ref} style={{position:"relative"}}>
+      {selG.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:5}}>{selG.map(g=><span key={g.id} style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:11,padding:"3px 8px",borderRadius:20,background:g.color,color:"#fff",fontWeight:600}}>{g.name}<span onClick={()=>remove(g.id)} style={{cursor:"pointer",fontSize:13,lineHeight:1,marginLeft:1}}>×</span></span>)}</div>}
+      <div style={{display:"flex"}}>
+        <input value={q} onChange={e=>{setQ(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} placeholder="프로젝트 검색 또는 새로 만들기..." style={{flex:1,padding:"8px 11px",borderRadius:"7px 0 0 7px",border:"1px solid #e2e8f0",borderRight:"none",fontSize:13,outline:"none"}}/>
+        <button type="button" onClick={()=>setOpen(o=>!o)} style={{padding:"0 9px",border:"1px solid #e2e8f0",borderRadius:"0 7px 7px 0",background:"#f8fafc",cursor:"pointer",fontSize:11,color:"#64748b"}}>{open?"▲":"▼"}</button>
+      </div>
+      {open&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",maxHeight:160,overflowY:"auto",marginTop:2}}>
+        {fil.map(g=><div key={g.id} onMouseDown={()=>add(g.id)} style={{padding:"8px 12px",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:7}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}><div style={{width:8,height:8,borderRadius:"50%",background:g.color}}/>{g.name}<span style={{fontSize:10,color:"#94a3b8",marginLeft:"auto"}}>{(g.members||[]).length}명</span></div>)}
+        {q.trim()&&!(groups||[]).find(g=>g.name===q.trim())&&<div onMouseDown={create} style={{padding:"8px 12px",fontSize:13,cursor:"pointer",color:"#6366f1",fontWeight:600,borderTop:fil.length?"1px solid #f1f5f9":"none"}} onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>+ "{q.trim()}" 새 프로젝트</div>}
+      </div>}
+    </div>
+  );
+}
+
+function PeopleSearch({ids,people,onChange,onCreatePerson,placeholder="인물 검색..."}){
+  const[q,setQ]=useState("");const[open,setOpen,ref]=useDD();
+  const[showAdd,setShowAdd]=useState(false);const[nn,setNn]=useState("");const[nj,setNj]=useState("");
+  const selP=(ids||[]).map(id=>(people||[]).find(p=>p.id===id)).filter(Boolean);
+  const avail=(people||[]).filter(p=>!(ids||[]).includes(p.id)&&(p.name.includes(q)||(p.org&&p.org.includes(q))));
+  const add=(id)=>{onChange([...(ids||[]),id]);setQ("");setOpen(false);};
+  const remove=(id)=>onChange((ids||[]).filter(x=>x!==id));
+  const qCreate=()=>{if(!nn.trim())return;const np=onCreatePerson({name:nn.trim(),job:nj.trim()});onChange([...(ids||[]),np.id]);setNn("");setNj("");setShowAdd(false);};
+  return(
+    <div ref={ref} style={{position:"relative"}}>
+      {selP.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:5}}>{selP.map(p=><div key={p.id} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 8px 3px 5px",borderRadius:20,background:p.color+"18",border:"1px solid "+p.color+"33"}}><div style={{width:16,height:16,borderRadius:"50%",background:p.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:8,fontWeight:700}}>{p.name[0]}</div><span style={{fontSize:11,fontWeight:600,color:p.color}}>{p.name}</span><span onClick={()=>remove(p.id)} style={{cursor:"pointer",fontSize:13,color:p.color,lineHeight:1}}>×</span></div>)}</div>}
+      <div style={{display:"flex",gap:6}}>
+        <div style={{flex:1,position:"relative"}}>
+          <input value={q} onChange={e=>{setQ(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} placeholder={placeholder} style={{width:"100%",padding:"8px 11px",borderRadius:7,border:"1px solid #e2e8f0",fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+          {open&&avail.length>0&&<div style={{position:"absolute",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",maxHeight:150,overflowY:"auto",marginTop:2}}>{avail.slice(0,8).map(p=><div key={p.id} onMouseDown={()=>add(p.id)} style={{padding:"8px 12px",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:7}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}><div style={{width:20,height:20,borderRadius:"50%",background:p.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:9,fontWeight:700}}>{p.name[0]}</div><span style={{fontWeight:600}}>{p.name}</span><span style={{fontSize:11,color:"#94a3b8"}}>{p.job}{p.org?" · "+p.org:""}</span></div>)}</div>}
+        </div>
+        {onCreatePerson&&<button onClick={()=>{setShowAdd(s=>!s);setOpen(false);}} style={{padding:"0 12px",borderRadius:7,border:"1px dashed #e2e8f0",background:showAdd?"#f1f5f9":"#fff",cursor:"pointer",fontSize:12,fontWeight:600,color:"#475569",whiteSpace:"nowrap"}}>+ 새 인물</button>}
+      </div>
+      {showAdd&&<div style={{marginTop:8,padding:12,background:"#f8fafc",borderRadius:8,border:"1px solid #e2e8f0"}}><div style={{display:"flex",gap:6,marginBottom:6}}><Inp value={nn} onChange={e=>setNn(e.target.value)} placeholder="이름 *" s={{flex:1}} autoFocus/><Inp value={nj} onChange={e=>setNj(e.target.value)} placeholder="직함" s={{flex:1}}/></div><div style={{display:"flex",gap:5,justifyContent:"flex-end"}}><Btn v="secondary" s={{fontSize:11}} onClick={()=>setShowAdd(false)}>취소</Btn><Btn s={{fontSize:11}} onClick={qCreate}>추가</Btn></div></div>}
+    </div>
+  );
+}
+
+function MtgProjSection({relProjs,groups,onToggle,onCreateAndAdd}){
+  const[q,setQ]=useState("");const[open,setOpen,ref]=useDD();
+  const selG=(relProjs||[]).map(id=>(groups||[]).find(g=>g.id===id)).filter(Boolean);
+  const unsel=(groups||[]).filter(g=>!(relProjs||[]).includes(g.id));
+  const fil=q?unsel.filter(g=>g.name.includes(q)):unsel;
+  const canNew=q.trim()&&!(groups||[]).find(g=>g.name===q.trim());
+  const sel=(id)=>{onToggle(id);setQ("");setOpen(false);};
+  const create=()=>{if(!q.trim())return;onCreateAndAdd(q.trim());setQ("");setOpen(false);};
+  return(
+    <div ref={ref} style={{marginBottom:6}}>
+      {selG.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>{selG.map(g=><span key={g.id} style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:11,padding:"3px 10px",borderRadius:20,background:g.color,color:"#fff",fontWeight:600}}>{g.name}<span onClick={()=>onToggle(g.id)} style={{cursor:"pointer",fontSize:13,lineHeight:1,marginLeft:2}}>×</span></span>)}</div>}
+      <div style={{position:"relative"}}>
+        <div style={{display:"flex"}}>
+          <input value={q} onChange={e=>{setQ(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)} placeholder="프로젝트 직접 입력 또는 기존 선택..." style={{flex:1,padding:"8px 11px",borderRadius:"7px 0 0 7px",border:"1px solid #e2e8f0",borderRight:"none",fontSize:13,outline:"none"}}/>
+          <button type="button" onClick={()=>setOpen(o=>!o)} style={{padding:"0 9px",border:"1px solid #e2e8f0",borderRadius:"0 7px 7px 0",background:"#f8fafc",cursor:"pointer",fontSize:11,color:"#64748b"}}>{open?"▲":"▼"}</button>
+        </div>
+        {open&&(fil.length>0||canNew)&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,zIndex:300,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",maxHeight:180,overflowY:"auto",marginTop:2}}>
+          {fil.map(g=><div key={g.id} onMouseDown={()=>sel(g.id)} style={{padding:"8px 12px",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:8}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}><div style={{width:8,height:8,borderRadius:"50%",background:g.color,flexShrink:0}}/><span>{g.name}</span><span style={{fontSize:10,color:"#94a3b8",marginLeft:"auto"}}>{(g.members||[]).length}명</span></div>)}
+          {canNew&&<div onMouseDown={create} style={{padding:"8px 12px",fontSize:13,cursor:"pointer",color:"#6366f1",fontWeight:600,borderTop:fil.length?"1px solid #f1f5f9":"none"}} onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>+ "{q.trim()}" 새 프로젝트로 추가</div>}
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+function FileSection({files,setFiles}){
+  const ref=useRef(null);const[prev,setPrev]=useState(null);
+  const addFile=(e)=>{const f=e.target.files[0];if(!f)return;if(f.size>MAX_FILE){alert("파일이 너무 커요 (최대 1.5MB)");return;}const reader=new FileReader();reader.onload=async(ev)=>{const fo={id:"f"+uid(),name:f.name,type:f.type,size:f.size,data:ev.target.result};setFiles(fs=>[...fs,fo]);try{await storage.set("crm-file-"+fo.id,JSON.stringify(fo));}catch(e){}};reader.readAsDataURL(f);e.target.value="";};
+  const remove=async(fid)=>{setFiles(fs=>fs.filter(x=>x.id!==fid));try{await storage.del("crm-file-"+fid);}catch(e){}};
+  const isImg=(t)=>t&&t.startsWith("image/");
+  return(
+    <div>
+      <input type="file" ref={ref} accept="image/*,.pdf" style={{display:"none"}} onChange={addFile}/>
+      {files.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>{files.map(f=><div key={f.id} style={{position:"relative",borderRadius:7,border:"1px solid #e2e8f0",overflow:"hidden",cursor:"pointer"}} onClick={()=>setPrev(f)}>{isImg(f.type)?<img src={f.data} alt={f.name} style={{width:70,height:70,objectFit:"cover",display:"block"}}/>:<div style={{width:70,height:70,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#f8fafc",gap:2}}><span style={{fontSize:24}}>📄</span><span style={{fontSize:8,color:"#64748b",textAlign:"center",padding:"0 3px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:66}}>{f.name}</span></div>}<div onClick={e=>{e.stopPropagation();remove(f.id);}} style={{position:"absolute",top:2,right:2,width:16,height:16,borderRadius:"50%",background:"rgba(0,0,0,0.5)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,cursor:"pointer",fontWeight:700}}>×</div></div>)}</div>}
+      <button onClick={()=>ref.current.click()} style={{padding:"7px 12px",borderRadius:7,border:"1px dashed #e2e8f0",background:"#fafafa",cursor:"pointer",fontSize:12,color:"#64748b",width:"100%"}}>📎 사진 / PDF 추가 (최대 1.5MB)</button>
+      {prev&&<div onClick={()=>setPrev(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400}}><div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,padding:16,maxWidth:"88vw",maxHeight:"88vh",overflow:"auto"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><span style={{fontSize:13,fontWeight:600}}>{prev.name}</span><div style={{display:"flex",gap:8}}><a href={prev.data} download={prev.name} style={{fontSize:12,color:"#6366f1",fontWeight:600,textDecoration:"none"}}>⬇</a><button onClick={()=>setPrev(null)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#94a3b8"}}>×</button></div></div>{isImg(prev.type)?<img src={prev.data} alt={prev.name} style={{maxWidth:"80vw",maxHeight:"75vh",borderRadius:8,display:"block"}}/>:<iframe src={prev.data} title={prev.name} style={{width:"75vw",height:"72vh",border:"none",borderRadius:8}}/>}</div></div>}
+    </div>
+  );
+}
+
+function NetworkGraph({people,connections,groups}){
+  const ref=useRef(null);
+  useEffect(()=>{
+    if(!ref.current)return;
+    const W=860,H=560;
+    const svg=d3.select(ref.current);svg.selectAll("*").remove();svg.attr("viewBox",`0 0 ${W} ${H}`);
+    const me={id:"__me__",name:"나",color:"#1e293b",x:W/2,y:H/2,fx:W/2,fy:H/2,isMe:true,intimacy:5};
+    const pN=people.map(p=>({...p}));const nm={"__me__":me};pN.forEach(n=>{nm[n.id]=n;});
+    const nodes=[me,...pN];
+    const nR=(x)=>x.isMe?24:Math.max(14,12+(((x.intimacy||3)-1)*2)+(((x.workImportance||3)-1)*1.5));
+    const links=[],es=new Set();
+    connections.forEach(c=>{const k=[c.from,c.to].sort().join("_");if(nm[c.from]&&nm[c.to]&&!es.has(k)){es.add(k);const im=c.from==="__me__"||c.to==="__me__";links.push({source:nm[c.from],target:nm[c.to],type:im?"meEx":"ex",reason:c.reason});}});
+    groups.forEach(grp=>{const mb=(grp.members||[]).filter(id=>nm[id]);for(let i=0;i<mb.length;i++)for(let j=i+1;j<mb.length;j++){const k=[mb[i],mb[j]].sort().join("_");if(!es.has(k)){es.add(k);links.push({source:nm[mb[i]],target:nm[mb[j]],type:"sp",gc:grp.color});}}});
+    people.forEach(p=>{(p.relatedPeople||[]).forEach(mid=>{const k=[p.id,mid].sort().join("_");if(!es.has(k)&&nm[p.id]&&nm[mid]){es.add(k);links.push({source:nm[p.id],target:nm[mid],type:"rel"});}});});
+    pN.forEach(p=>{const k=["__me__",p.id].sort().join("_");if(!es.has(k)){es.add(k);links.push({source:me,target:p,type:p.isDirectContact?"dc":"rad",iv:p.intimacy||3});}});
+    svg.append("defs").append("marker").attr("id","arr").attr("viewBox","0 -5 10 10").attr("refX",28).attr("markerWidth",5).attr("markerHeight",5).attr("orient","auto").append("path").attr("d","M0,-5L10,0L0,5").attr("fill","#475569");
+    const g=svg.append("g");svg.call(d3.zoom().scaleExtent([0.1,4]).on("zoom",e=>g.attr("transform",e.transform)));
+    const sim=d3.forceSimulation(nodes).force("link",d3.forceLink(links).distance(d=>{if(d.type==="rad")return 280-((d.iv||3)-1)*36;if(d.type==="dc")return 200-((d.iv||3)-1)*30;if(d.type==="meEx")return 140;if(d.type==="ex")return 120;return 90;}).strength(d=>{if(d.type==="rad")return 0.25;if(d.type==="dc")return 0.4;if(d.type==="meEx")return 0.8;if(d.type==="ex")return 0.7;return 0.3;})).force("charge",d3.forceManyBody().strength(-280)).force("collide",d3.forceCollide(d=>nR(d)+18));
+    const rEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="rad")).enter().append("line").attr("stroke",d=>d.target.color||"#94a3b8").attr("stroke-width",d=>(d.iv||3)*0.4+0.4).attr("stroke-opacity",0.2);
+    const dcEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="dc")).enter().append("line").attr("stroke",d=>d.target.color||"#f59e0b").attr("stroke-width",d=>(d.iv||3)*0.6+1.2).attr("stroke-opacity",0.75);
+    const spEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="sp")).enter().append("line").attr("stroke",d=>d.gc||"#94a3b8").attr("stroke-width",1.2).attr("stroke-dasharray","4,4").attr("stroke-opacity",0.5);
+    const rlEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="rel")).enter().append("line").attr("stroke","#cbd5e1").attr("stroke-width",1).attr("stroke-dasharray","3,4");
+    const mxEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="meEx")).enter().append("line").attr("stroke","#6366f1").attr("stroke-width",2.2).attr("marker-end","url(#arr)");
+    const exEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="ex")).enter().append("line").attr("stroke","#94a3b8").attr("stroke-width",1.5).attr("stroke-dasharray","5,4").attr("marker-end","url(#arr)");
+    const lTxt=g.append("g").selectAll("text").data(links.filter(l=>l.type==="ex"||l.type==="meEx")).enter().append("text").attr("font-size",9).attr("fill","#94a3b8").attr("text-anchor","middle").text(d=>d.reason||"");
+    const nG=g.append("g").selectAll("g").data(nodes).enter().append("g").style("cursor","grab").call(d3.drag().on("start",(e,d)=>{if(!e.active)sim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;}).on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y;}).on("end",(e,d)=>{if(!e.active)sim.alphaTarget(0);if(!d.isMe){d.fx=null;d.fy=null;}}));
+    const r30=Date.now()-30*24*60*60*1000;
+    nG.filter(d=>!d.isMe&&(d.updatedAt||d.createdAt)>r30).append("circle").attr("r",d=>nR(d)+6).attr("fill","none").attr("stroke",d=>d.color||"#94a3b8").attr("stroke-width",1.5).attr("opacity",.35).attr("stroke-dasharray","3,3");
+    nG.append("circle").attr("r",d=>nR(d)).attr("fill",d=>d.isMe?"#1e293b":d.color||"#94a3b8");
+    nG.filter(d=>d.isMe).append("circle").attr("r",d=>nR(d)+4).attr("fill","none").attr("stroke","#1e293b").attr("stroke-width",2).attr("opacity",.25);
+    nG.append("text").attr("dy","0.35em").attr("text-anchor","middle").attr("fill","#fff").attr("font-weight",700).attr("font-size",d=>d.isMe?13:Math.max(9,nR(d)*.55)).text(d=>d.isMe?"나":d.name[0]);
+    nG.filter(d=>!d.isMe).append("text").attr("dy",d=>`${nR(d)+13}px`).attr("text-anchor","middle").attr("fill","#334155").attr("font-weight",600).attr("font-size",10).text(d=>d.name);
+    nG.filter(d=>!d.isMe).append("text").attr("dy",d=>`${nR(d)+24}px`).attr("text-anchor","middle").attr("fill","#94a3b8").attr("font-size",8).text(d=>fmtYYMM(d.updatedAt||d.createdAt));
+    const upd=(el)=>el.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+    sim.on("tick",()=>{upd(rEl);upd(dcEl);upd(spEl);upd(rlEl);upd(mxEl);upd(exEl);lTxt.attr("x",d=>(d.source.x+d.target.x)/2).attr("y",d=>(d.source.y+d.target.y)/2-8);nG.attr("transform",d=>`translate(${d.x},${d.y})`);});
+    return()=>sim.stop();
+  },[people,connections,groups]);
+  return(
+    <div style={{borderRadius:12,overflow:"hidden",border:"1px solid #e2e8f0",background:"#fafbfc"}}>
+      <svg ref={ref} style={{display:"block",width:"100%",minHeight:560}}/>
+      <div style={{padding:"6px 14px",fontSize:10,color:"#94a3b8",borderTop:"1px solid #f1f5f9",background:"#fff",display:"flex",gap:12,flexWrap:"wrap"}}>
+        <span>🖱️ 드래그·줌</span><span style={{fontWeight:600}}>━ 직접관계</span><span style={{color:"#6366f1",fontWeight:600}}>━ 명시연결</span><span>┄ 같은 프로젝트</span>
+      </div>
+    </div>
+  );
+}
+
+function MeetingCalendar({meetings,people,onAdd,onEdit}){
+  const[view,setView]=useState(new Date());
+  const yr=view.getFullYear(),mo=view.getMonth();
+  const firstDow=(new Date(yr,mo,1).getDay()+6)%7;
+  const total=new Date(yr,mo+1,0).getDate();
+  const mStr=`${yr}-${String(mo+1).padStart(2,"0")}`;
+  const byDay={};(meetings||[]).filter(m=>m.date.startsWith(mStr)).forEach(m=>{const d=parseInt(m.date.slice(8));if(!byDay[d])byDay[d]=[];byDay[d].push(m);});
+  const gp=(id)=>(people||[]).find(p=>p.id===id);
+  const today=new Date();const isToday=(d)=>today.getFullYear()===yr&&today.getMonth()===mo&&today.getDate()===d;
+  const chipCol=(m)=>mtCol(m)||(gp(m.attendees&&m.attendees[0])?.color)||"#94a3b8";
+  const cells=[];for(let i=0;i<firstDow;i++)cells.push(null);for(let d=1;d<=total;d++)cells.push(d);
+  return(
+    <div style={{background:"#fff",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",borderBottom:"1px solid #f1f5f9"}}>
+        <button onClick={()=>setView(new Date(yr,mo-1,1))} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#64748b",lineHeight:1}}>‹</button>
+        <span style={{fontWeight:700,fontSize:14}}>{yr}년 {mo+1}월</span>
+        <button onClick={()=>setView(new Date(yr,mo+1,1))} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#64748b",lineHeight:1}}>›</button>
+      </div>
+      <div style={{display:"flex",gap:10,padding:"5px 12px",borderBottom:"1px solid #f8fafc",flexWrap:"wrap"}}>
+        {MTYPES.map(t=><div key={t} style={{display:"flex",alignItems:"center",gap:3}}><div style={{width:7,height:7,borderRadius:2,background:MCOLORS[t]}}/><span style={{fontSize:9,color:"#64748b"}}>{t}</span></div>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"3px 8px 0"}}>
+        {["월","화","수","목","금","토","일"].map(d=><div key={d} style={{textAlign:"center",padding:"5px 0",fontSize:9,fontWeight:600,color:d==="토"?"#60a5fa":d==="일"?"#f87171":"#94a3b8"}}>{d}</div>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"0 8px 8px",gap:1}}>
+        {cells.map((d,i)=>{
+          if(!d)return <div key={"e"+i}/>;
+          const ds=`${yr}-${String(mo+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+          return(
+            <div key={d} onClick={()=>onAdd(ds)} style={{minHeight:64,padding:"2px",borderRadius:5,background:isToday(d)?"#eff6ff":"transparent",border:"1px solid "+(isToday(d)?"#bfdbfe":"transparent"),minWidth:0,overflow:"hidden",cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:1}}>
+                <span style={{fontSize:9,fontWeight:isToday(d)?700:400,color:isToday(d)?"#3b82f6":"#475569"}}>{d}</span>
+                <span onClick={e=>{e.stopPropagation();onAdd(ds);}} style={{fontSize:12,color:"#d1d5db",cursor:"pointer",fontWeight:700,lineHeight:1}}>+</span>
+              </div>
+              {(byDay[d]||[]).slice(0,3).map(m=>{const col=chipCol(m),isT=!!mtCol(m);return<div key={m.id} onClick={e=>{e.stopPropagation();onEdit(m);}} style={{fontSize:8,padding:"2px 3px",borderRadius:3,background:col+"22",color:col,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",wordBreak:"break-all",marginBottom:1,cursor:"pointer",lineHeight:1.3,borderLeft:isT?"2px solid "+col:"none"}}>{m.time&&<span style={{opacity:.7}}>{m.time} </span>}{m.project}</div>;})}
+              {(byDay[d]||[]).length>3&&<div style={{fontSize:7,color:"#94a3b8"}}>+{(byDay[d]||[]).length-3}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PersonModal({data,groups,orgs,people,meetings,onSave,onDelete,onClose,onCreateGroup,onCreatePerson}){
+  const mk=(d)=>Object.assign({name:"",job:"",dept:"",org:"",contact:"",isDirectContact:true,notes:emptyNotes(),relatedPeople:[],intimacy:3,workImportance:3,groups:[],color:PALETTE[0]},d||{},{notes:Object.assign({},emptyNotes(),(d&&d.notes)||{}),relatedPeople:(d&&d.relatedPeople)||[]});
+  const[form,setForm]=useState(()=>mk(data));
+  const[confirmDel,setConfirmDel]=useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const setN=(k,v)=>setForm(f=>({...f,notes:{...f.notes,[k]:v}}));
+  const addCF=()=>setForm(f=>({...f,notes:{...f.notes,custom:[...f.notes.custom,{id:uid(),label:"",value:""}]}}));
+  const setCF=(id,k,v)=>setForm(f=>({...f,notes:{...f.notes,custom:f.notes.custom.map(c=>c.id===id?{...c,[k]:v}:c)}}));
+  const rmCF=(id)=>setForm(f=>({...f,notes:{...f.notes,custom:f.notes.custom.filter(c=>c.id!==id)}}));
+  const lastM=data?.id?[...(meetings||[])].filter(m=>m.attendees?.includes(data.id)).sort((a,b)=>b.date.localeCompare(a.date))[0]:null;
+  const gCount=(form.groups||[]).length;
+  useEffect(()=>{const c=autoColor(form.org,form.job,form.isDirectContact,gCount);setForm(f=>({...f,color:c}));},[form.org,form.job,form.isDirectContact,gCount]);
+  const pickC=async()=>{if('contacts' in navigator&&'ContactsManager' in window){try{const c=await navigator.contacts.select(['name','tel'],{multiple:false});if(c?.[0]?.tel?.[0])set("contact",c[0].tel[0]);}catch(e){}}else alert('연락처 불러오기는 Android Chrome에서 지원됩니다.');};
+  return(
+    <Modal title={data?"인물 수정":"새 인물 추가"} onClose={onClose} wide>
+      {confirmDel&&<ConfirmDel label={data?.name} onConfirm={()=>onDelete(data.id)} onCancel={()=>setConfirmDel(false)}/>}
+      <Sec c="기본 정보"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl c="이름 *" mt={4}/><Inp value={form.name} onChange={e=>set("name",e.target.value)} placeholder="홍길동" autoFocus/></div>
+        <div><Lbl c="직함" mt={4}/><Inp value={form.job} onChange={e=>set("job",e.target.value)} placeholder="팀장, 대표, 교수..."/></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl c="부서"/><Inp value={form.dept||""} onChange={e=>set("dept",e.target.value)} placeholder="개발팀..."/></div>
+        <div><Lbl c="소속"/><OrgCombo value={form.org} onChange={v=>set("org",v)} orgs={orgs}/></div>
+      </div>
+      <Lbl c="연락처"/>
+      <div style={{display:"flex",gap:6}}>
+        <Inp value={form.contact} onChange={e=>set("contact",e.target.value)} placeholder="010-0000-0000" s={{flex:1}}/>
+        <button onClick={pickC} style={{padding:"0 12px",borderRadius:7,border:"1px solid #e2e8f0",background:"#f8fafc",cursor:"pointer",fontSize:16,flexShrink:0,color:"#6366f1",fontWeight:700}}>＋</button>
+      </div>
+      <div onClick={()=>set("isDirectContact",!form.isDirectContact)} style={{display:"flex",alignItems:"center",gap:8,marginTop:12,padding:"9px 12px",borderRadius:8,border:"1.5px solid "+(form.isDirectContact?"#6366f1":"#e2e8f0"),background:form.isDirectContact?"#f5f3ff":"#f8fafc",cursor:"pointer",userSelect:"none"}}>
+        <div style={{width:18,height:18,borderRadius:5,border:"2px solid "+(form.isDirectContact?"#6366f1":"#cbd5e1"),background:form.isDirectContact?"#6366f1":"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{form.isDirectContact&&<span style={{color:"#fff",fontSize:12,lineHeight:1,fontWeight:700}}>✓</span>}</div>
+        <div><div style={{fontSize:12,fontWeight:600,color:form.isDirectContact?"#6366f1":"#475569"}}>나와 직접 관계있는 사람</div><div style={{fontSize:10,color:"#94a3b8"}}>기본 체크 · 해제 시 연한 선</div></div>
+      </div>
+      <Lbl c="색상 (자동 · 수동 변경 가능)"/>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><div style={{width:14,height:14,borderRadius:"50%",background:form.color,border:"2px solid #e2e8f0",flexShrink:0}}/><span style={{fontSize:10,color:"#64748b"}}>소속/직함 기준 자동 설정</span></div>
+      <Pal value={form.color} onChange={v=>set("color",v)}/>
+      <Sec c="프로젝트"/><GroupCombo selected={form.groups} onChange={v=>set("groups",v)} groups={groups} onCreateGroup={onCreateGroup}/>
+      <Sec c="관련 인물"/><PeopleSearch ids={form.relatedPeople} people={(people||[]).filter(p=>p.id!==data?.id)} onChange={v=>set("relatedPeople",v)} onCreatePerson={onCreatePerson} placeholder="기존 인맥에서 검색..."/>
+      <Sec c="관계 설정"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}><Scale5 value={form.intimacy} onChange={v=>set("intimacy",v)} label="친밀도"/><Scale5 value={form.workImportance} onChange={v=>set("workImportance",v)} label="업무 중요도"/></div>
+      <Sec c="상세 메모"/>
+      <div style={{marginBottom:4}}>
+        <Lbl c="📅 마지막 미팅" mt={4}/>
+        <div style={{padding:"8px 11px",borderRadius:7,border:"1px solid #e2e8f0",fontSize:13,background:"#f8fafc",color:lastM?"#1e293b":"#94a3b8",display:"flex",alignItems:"center",gap:8}}>
+          {lastM?<><span style={{fontWeight:600}}>{lastM.date}</span>{lastM.meetingType&&<span style={{fontSize:10,padding:"1px 7px",borderRadius:10,background:MCOLORS[lastM.meetingType]+"22",color:MCOLORS[lastM.meetingType],fontWeight:700}}>{lastM.meetingType}</span>}<span style={{color:"#64748b",fontSize:12}}>{lastM.project}</span></>:<span>없음</span>}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:4}}>
+        {NOTE_FIELDS.map(f=><div key={f.key}><div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:3}}>{f.label}</div><TA value={form.notes[f.key]||""} onChange={e=>setN(f.key,e.target.value)} placeholder={f.ph} rows={1}/></div>)}
+        <div><div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:3}}>🤝 관계의 시작</div><Inp type="date" value={form.notes.relationStart||""} onChange={e=>setN("relationStart",e.target.value)}/></div>
+        <div><div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:3}}>📁 함께 한 프로젝트</div><TA value={form.notes.projects||""} onChange={e=>setN("projects",e.target.value)} placeholder="협업, 진행한 일..." rows={1}/></div>
+      </div>
+      <Lbl c="비공식 메모" mt={12}/><TA value={form.notes.memo||""} onChange={e=>setN("memo",e.target.value)} placeholder="자유롭게 남기는 비공식 메모..." rows={2}/>
+      {form.notes.custom.map(c=><div key={c.id} style={{display:"flex",gap:6,alignItems:"flex-start",marginTop:6}}><Inp value={c.label} onChange={e=>setCF(c.id,"label",e.target.value)} placeholder="필드명" s={{width:100,flexShrink:0}}/><TA value={c.value} onChange={e=>setCF(c.id,"value",e.target.value)} placeholder="내용..." rows={1} s={{flex:1}}/><button onClick={()=>rmCF(c.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:16,padding:"8px 4px",flexShrink:0}}>×</button></div>)}
+      <button onClick={addCF} style={{marginTop:8,background:"none",border:"1px dashed #e2e8f0",borderRadius:7,cursor:"pointer",padding:"7px 12px",fontSize:12,color:"#94a3b8",width:"100%"}}>+ 커스텀 필드 추가</button>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:18}}>
+        <div>{data&&<Btn v="danger" onClick={()=>setConfirmDel(true)}>삭제</Btn>}</div>
+        <div style={{display:"flex",gap:8}}><Btn v="secondary" onClick={onClose}>취소</Btn><Btn onClick={()=>form.name.trim()&&onSave({...form,updatedAt:Date.now()})}>저장</Btn></div>
+      </div>
+    </Modal>
+  );
+}
+
+function MeetingModal({data,people,groups,locations,onSave,onDelete,onClose,onCreateGroup,onAddLocation}){
+  const wide=useWide();
+  const[mid]=useState(()=>data?.id||"m"+uid());
+  const draftKey="crm-mtg-draft-"+(data?.id||"new");
+  const init={meetingType:"",location:"",date:todayStr(),time:"09:00",project:"",relatedProjects:[],attendees:[],memo:"",rating:0,materialsToSend:"",nextContactDate:"",insights:"",nextKeywords:"",filesMeta:[]};
+  const[form,setForm]=useState(()=>{
+    try{const dr=localStorage.getItem(draftKey);if(dr)return Object.assign({},init,data||{},JSON.parse(dr));}catch(e){}
+    return Object.assign({},init,data||{});
+  });
+  const[files,setFiles]=useState([]);
+  const[autoSaved,setAutoSaved]=useState(false);
+  const[confirmDel,setConfirmDel]=useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  useEffect(()=>{
+    const t=setTimeout(()=>{try{localStorage.setItem(draftKey,JSON.stringify(form));setAutoSaved(true);setTimeout(()=>setAutoSaved(false),1500);}catch(e){}},600);
+    return()=>clearTimeout(t);
+  },[form]);
+
+  const toggleProj=(gid)=>{
+    const cur=(form.relatedProjects||[]).slice();
+    if(cur.includes(gid)){setForm(f=>({...f,relatedProjects:cur.filter(x=>x!==gid)}));}
+    else{const grp=(groups||[]).find(g=>g.id===gid);const newAtt=(form.attendees||[]).slice();if(grp&&grp.members)grp.members.forEach(id=>{if(!newAtt.includes(id))newAtt.push(id);});setForm(f=>({...f,relatedProjects:[...cur,gid],attendees:newAtt}));}
+  };
+
+  useEffect(()=>{
+    if(!data?.filesMeta?.length)return;
+    const load=async()=>{const loaded=await Promise.all(data.filesMeta.map(async fm=>{try{const r=await storage.get("crm-file-"+fm.id);return r?.value?JSON.parse(r.value):null;}catch(e){return null;}}));setFiles(loaded.filter(Boolean));};
+    load();
+  },[data?.id]);
+
+  const handleSave=()=>{
+    if(!form.project.trim()){alert("미팅 주제를 입력해주세요.");return;}
+    if(form.location&&form.location.trim()&&!(locations||[]).includes(form.location.trim()))onAddLocation(form.location.trim());
+    const fm=files.map(f=>({id:f.id,name:f.name,type:f.type,size:f.size}));
+    try{localStorage.removeItem(draftKey);}catch(e){}
+    onSave({...form,id:mid,filesMeta:fm});
+  };
+  const exportThis=()=>{
+    const wb=XLSX.utils.book_new();
+    const row={날짜:form.date,시간:form.time,장소:form.location||"",유형:form.meetingType||"",주제:form.project,참석자:(form.attendees||[]).map(id=>{const p=(people||[]).find(q=>q.id===id);return p?p.name:"";}).join(", "),메모:form.memo,만족도:form.rating};
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([row]),"미팅");
+    XLSX.writeFile(wb,`미팅_${form.date}_${form.project||"내용없음"}.xlsx`);
+  };
+
+  return(
+    <Modal title={data?"미팅 수정":"미팅 추가"} onClose={onClose} widePx={wide?1320:660}>
+      {confirmDel&&<ConfirmDel label={form.project} onConfirm={()=>{try{localStorage.removeItem(draftKey);}catch(e){}onDelete(data.id);}} onCancel={()=>setConfirmDel(false)}/>}
+      <Lbl c="미팅 장소" mt={4}/>
+      <LocCombo value={form.location||""} onChange={v=>set("location",v)} locations={locations||[]}/>
+      <Lbl c="미팅 유형"/>
+      <div style={{position:"relative",marginBottom:8}}>
+        <select value={form.meetingType||""} onChange={e=>set("meetingType",e.target.value)} style={{width:"100%",padding:"8px 11px",borderRadius:7,fontSize:13,outline:"none",border:"1px solid #e2e8f0",background:"#fff",color:"#1e293b",cursor:"pointer",appearance:"none",WebkitAppearance:"none"}}>
+          <option value="">유형 선택...</option>{MTYPES.map(t=><option key={t} value={t}>{t}</option>)}
+        </select>
+        <div style={{position:"absolute",right:11,top:"50%",transform:"translateY(-50%)",pointerEvents:"none",color:"#64748b",fontSize:11}}>▼</div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl c="날짜" mt={4}/><Inp type="date" value={form.date} onChange={e=>set("date",e.target.value)}/></div>
+        <div><Lbl c="시간" mt={4}/><TimePicker value={form.time} onChange={v=>set("time",v)}/></div>
+      </div>
+      <Lbl c="주제 *"/><Inp value={form.project} onChange={e=>set("project",e.target.value)} placeholder="미팅 주제"/>
+      <Lbl c="관련 프로젝트"/>
+      <MtgProjSection relProjs={form.relatedProjects||[]} groups={groups||[]} onToggle={toggleProj} onCreateAndAdd={(name)=>{const ng=onCreateGroup(name);setForm(f=>({...f,relatedProjects:[...(f.relatedProjects||[]),ng.id]}));}}/>
+      <Lbl c="참석자"/>
+      <PeopleSearch ids={form.attendees||[]} people={people||[]} onChange={v=>set("attendees",v)} placeholder="참석자 검색해서 추가..."/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:14,marginBottom:2}}>
+        <Lbl c="메모 (회의록)" mt={0}/>
+        {autoSaved&&<span style={{fontSize:10,color:"#22c55e",fontWeight:600}}>✓ 자동 저장됨</span>}
+      </div>
+      <TA value={form.memo} onChange={e=>set("memo",e.target.value)} placeholder="미팅 내용을 자유롭게 기록하세요... (실시간 자동 저장)" rows={10} s={{minHeight:200,lineHeight:1.7}}/>
+      <Sec c="첨부 파일"/><FileSection files={files} setFiles={setFiles}/>
+      <Sec c="미팅 후 리뷰"/>
+      <Stars value={form.rating} onChange={v=>set("rating",v)} label="만족도 / 분위기"/>
+      <Lbl c="전달 예정 자료" mt={10}/><Inp value={form.materialsToSend} onChange={e=>set("materialsToSend",e.target.value)} placeholder="보내주기로 한 자료..."/>
+      <Lbl c="다음 연락 기한"/><Inp type="date" value={form.nextContactDate} onChange={e=>set("nextContactDate",e.target.value)}/>
+      <Sec c="인사이트 & 다음 준비"/>
+      <Lbl c="미팅 인사이트" mt={4}/><TA value={form.insights} onChange={e=>set("insights",e.target.value)} placeholder="이번 미팅에서 얻은 발견..."/>
+      <Lbl c="다음 미팅 준비 키워드"/><Inp value={form.nextKeywords} onChange={e=>set("nextKeywords",e.target.value)} placeholder="다음을 위한 주제, 키워드..."/>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:18}}>
+        <div>{data&&<Btn v="danger" onClick={()=>setConfirmDel(true)}>삭제</Btn>}</div>
+        <div style={{display:"flex",gap:8}}>
+          <Btn v="secondary" onClick={onClose}>취소</Btn>
+          <Btn v="secondary" s={{color:"#0369a1",background:"#f0f9ff"}} onClick={exportThis}>⬇ 엑셀 저장</Btn>
+          <Btn onClick={handleSave}>저장</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ProjectModal({data,people,groups,onSave,onDelete,onClose}){
+  const nc=PALETTE[(groups||[]).length%PALETTE.length];
+  const[form,setForm]=useState(()=>Object.assign({name:"",desc:"",color:nc,members:[],startDate:"",endDate:"",history:[]},data||{},{color:data?.color||nc}));
+  const[confirmDel,setConfirmDel]=useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const delH=(hid)=>set("history",(form.history||[]).filter(h=>h.id!==hid));
+  const handleSave=()=>{
+    if(!form.name.trim())return;
+    const changes=[];
+    if(data){const om=data.members||[],nm=form.members||[];nm.forEach(id=>{if(!om.includes(id)){const x=(people||[]).find(q=>q.id===id);changes.push((x?x.name:id)+" 추가");}});om.forEach(id=>{if(!nm.includes(id)){const x=(people||[]).find(q=>q.id===id);changes.push((x?x.name:id)+" 제거");}});if(data.name!==form.name)changes.push("이름→"+form.name);if(data.startDate!==form.startDate)changes.push("시작일→"+(form.startDate||"없음"));if(data.endDate!==form.endDate)changes.push("종료일→"+(form.endDate||"없음"));if(data.desc!==form.desc)changes.push("내용 수정");}
+    let hist=form.history||[];if(changes.length>0)hist=[{id:uid(),date:todayStr(),desc:changes.join(", ")},...hist];
+    onSave({...form,history:hist});
+  };
+  return(
+    <Modal title={data?"프로젝트 수정":"새 프로젝트"} onClose={onClose} wide>
+      {confirmDel&&<ConfirmDel label={data?.name} onConfirm={()=>onDelete(data.id)} onCancel={()=>setConfirmDel(false)}/>}
+      <Lbl c="프로젝트명 *" mt={4}/><Inp value={form.name} onChange={e=>set("name",e.target.value)} placeholder="프로젝트 이름" autoFocus/>
+      <Lbl c="사업 내용"/><Inp value={form.desc||""} onChange={e=>set("desc",e.target.value)} placeholder="한 줄 설명..."/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl c="시작일"/><Inp type="date" value={form.startDate||""} onChange={e=>set("startDate",e.target.value)}/></div>
+        <div><Lbl c="종료일"/><Inp type="date" value={form.endDate||""} onChange={e=>set("endDate",e.target.value)}/></div>
+      </div>
+      <Lbl c="색상"/><Pal value={form.color} onChange={v=>set("color",v)}/>
+      <Sec c="관련 인물"/>
+      <PeopleSearch ids={form.members||[]} people={people||[]} onChange={v=>set("members",v)} placeholder="인물 검색해서 추가..."/>
+      {(form.history||[]).length>0&&(
+        <div style={{marginTop:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><span style={{fontSize:11,fontWeight:700,color:"#334155"}}>📋 수정 이력</span><div style={{flex:1,height:1,background:"#f1f5f9"}}/></div>
+          <div style={{maxHeight:160,overflowY:"auto",border:"1px solid #f1f5f9",borderRadius:8}}>
+            {(form.history||[]).map(h=><div key={h.id} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"7px 10px",borderBottom:"1px solid #f8fafc"}}><div style={{flex:1,minWidth:0}}><span style={{fontSize:10,fontWeight:700,color:"#94a3b8",marginRight:6}}>{h.date}</span><span style={{fontSize:11,color:"#475569"}}>{h.desc}</span></div><button onClick={()=>delH(h.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:14,lineHeight:1,flexShrink:0}}>×</button></div>)}
+          </div>
+        </div>
+      )}
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:18}}>
+        <div>{data&&<Btn v="danger" onClick={()=>setConfirmDel(true)}>삭제</Btn>}</div>
+        <div style={{display:"flex",gap:8}}><Btn v="secondary" onClick={onClose}>취소</Btn><Btn onClick={handleSave}>저장</Btn></div>
+      </div>
+    </Modal>
+  );
+}
+
+function ConnModal({data,people,onSave,onDelete,onClose}){
+  const[form,setForm]=useState(Object.assign({from:"",to:"",reason:""},data||{}));
+  const[confirmDel,setConfirmDel]=useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const ss={width:"100%",padding:"8px 11px",borderRadius:7,border:"1px solid #e2e8f0",fontSize:13,outline:"none",background:"#fff"};
+  const opts=[{id:"__me__",name:"나 (본인)",job:""},...(people||[])];
+  return(
+    <Modal title={data?"연결 수정":"연결 추가"} onClose={onClose}>
+      {confirmDel&&<ConfirmDel onConfirm={()=>onDelete(data.id)} onCancel={()=>setConfirmDel(false)}/>}
+      <div style={{fontSize:11,color:"#94a3b8",marginBottom:8,background:"#f8fafc",borderRadius:7,padding:"7px 10px"}}>💡 나 (본인)을 선택해 나와의 관계를 기입하거나 인물 간 관계를 아카이빙할 수 있어요.</div>
+      <Lbl c="출발 인물" mt={4}/>
+      <select value={form.from} onChange={e=>set("from",e.target.value)} style={ss}><option value="">선택...</option>{opts.map(p=><option key={p.id} value={p.id}>{p.name}{p.job?" ("+p.job+")":""}</option>)}</select>
+      <Lbl c="도착 인물"/>
+      <select value={form.to} onChange={e=>set("to",e.target.value)} style={ss}><option value="">선택...</option>{opts.filter(p=>p.id!==form.from).map(p=><option key={p.id} value={p.id}>{p.name}{p.job?" ("+p.job+")":""}</option>)}</select>
+      <Lbl c="연결 이유"/><Inp value={form.reason} onChange={e=>set("reason",e.target.value)} placeholder="ex) 전 직장 동료"/>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:18}}>
+        <div>{data&&<Btn v="danger" onClick={()=>setConfirmDel(true)}>삭제</Btn>}</div>
+        <div style={{display:"flex",gap:8}}><Btn v="secondary" onClick={onClose}>취소</Btn><Btn onClick={()=>form.from&&form.to&&form.from!==form.to&&onSave(form)}>저장</Btn></div>
+      </div>
+    </Modal>
+  );
+}
+
+function PersonCard({p,groups,onClick}){
+  const pG=(p.groups||[]).map(id=>(groups||[]).find(g=>g.id===id)).filter(Boolean);
+  return(
+    <div onClick={onClick} style={{background:"#fff",borderRadius:12,padding:13,border:"1px solid #e8edf2",cursor:"pointer",borderLeft:"4px solid "+p.color,boxShadow:"0 1px 4px rgba(0,0,0,0.05)",transition:"box-shadow .15s"}} onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 14px rgba(0,0,0,0.1)"} onMouseLeave={e=>e.currentTarget.style.boxShadow="0 1px 4px rgba(0,0,0,0.05)"}>
+      <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:6}}>
+        <div style={{width:34,height:34,borderRadius:"50%",background:p.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:14,flexShrink:0}}>{p.name[0]}</div>
+        <div style={{overflow:"hidden",flex:1}}>
+          <div style={{fontWeight:700,fontSize:13,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
+          <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{[p.job,p.dept,p.org].filter(Boolean).join(" · ")||"—"}</div>
+        </div>
+      </div>
+      {pG.length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{pG.map(g=><span key={g.id} style={{fontSize:10,padding:"2px 8px",borderRadius:20,background:g.color+"22",color:g.color,fontWeight:600}}>{g.name}</span>)}</div>}
+    </div>
+  );
+}
+
+function ProjectTab({sG,people,setModal}){
+  const today=todayStr();
+  const isActive=(g)=>!g.endDate||g.endDate>=today;
+  const sorted=[...sG].sort((a,b)=>b.createdAt-a.createdAt);
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <span style={{fontWeight:700,fontSize:15}}>프로젝트</span>
+        <Btn onClick={()=>setModal({type:"group",data:null})}>+ 추가</Btn>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
+        {sorted.map(g=>{
+          const active=isActive(g);
+          const sm=(g.members||[]).slice().sort((a,b)=>{const pa=(people||[]).find(x=>x.id===a),pb=(people||[]).find(x=>x.id===b);if(!pa||!pb)return 0;return pa.name.localeCompare(pb.name,"ko");});
+          return(
+            <div key={g.id} style={{background:"#fff",borderRadius:12,padding:16,border:"1px solid #e8edf2",boxShadow:"0 1px 4px rgba(0,0,0,0.05)",opacity:active?1:0.8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3,flexWrap:"wrap"}}>
+                    <div style={{width:9,height:9,borderRadius:"50%",background:g.color,flexShrink:0}}/>
+                    <span style={{fontWeight:700,fontSize:14}}>{g.name}</span>
+                    <span style={{fontSize:11,color:"#94a3b8"}}>{(g.members||[]).length}명</span>
+                    <span style={{fontSize:10,padding:"1px 8px",borderRadius:20,fontWeight:700,background:active?"#dcfce7":"#f1f5f9",color:active?"#16a34a":"#94a3b8",border:"1px solid "+(active?"#bbf7d0":"#e2e8f0")}}>{active?"진행중":"완료"}</span>
+                  </div>
+                  {g.desc&&<div style={{fontSize:11,color:"#64748b",marginBottom:4,paddingLeft:16}}>{g.desc}</div>}
+                  {(g.startDate||g.endDate)&&<div style={{fontSize:10,color:"#94a3b8",paddingLeft:16,marginBottom:4}}>{g.startDate||"?"} ~ {g.endDate||"진행중"}</div>}
+                </div>
+                <button onClick={()=>setModal({type:"group",data:g})} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#94a3b8",flexShrink:0}}>✏️</button>
+              </div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {!sm.length&&<span style={{fontSize:11,color:"#cbd5e1"}}>멤버 없음</span>}
+                {sm.map(mid=>{const p=(people||[]).find(x=>x.id===mid);return p?<div key={mid} style={{display:"flex",alignItems:"center",gap:4,background:"#f8fafc",borderRadius:7,padding:"4px 7px"}}><div style={{width:16,height:16,borderRadius:"50%",background:p.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:8,fontWeight:700}}>{p.name[0]}</div><div><div style={{fontSize:11,fontWeight:600,lineHeight:1.2}}>{p.name}</div>{p.org&&<div style={{fontSize:9,color:"#94a3b8"}}>{p.org}</div>}</div></div>:null;})}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({tab,setTab,alerts,saveSt,onBell,onExport,onSettings,sbConn}){
+  const TABS=[
+    {id:"people",label:"People",Icon:IPeopleIcon},
+    {id:"groups",label:"Project",Icon:IProjectIcon},
+    {id:"connections",label:"Connect",Icon:IConnectIcon},
+    {id:"meetings",label:"Meet",Icon:IMeetIcon},
+  ];
+  return(
+    <div style={{width:330,minWidth:330,background:"#1e293b",display:"flex",flexDirection:"column",height:"100dvh",position:"sticky",top:0,flexShrink:0}}>
+      <div style={{padding:"22px 20px 14px",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+        <div style={{fontWeight:900,fontSize:21,color:"#22c55e",letterSpacing:3}}>WEMET</div>
+        <div style={{fontSize:15,color:"rgba(255,255,255,0.3)",marginTop:2}}>Personal CRM</div>
+      </div>
+      <div style={{flex:1,padding:"10px 10px",display:"flex",flexDirection:"column",gap:2,overflowY:"auto"}}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 12px",borderRadius:10,border:"none",cursor:"pointer",background:tab===t.id?"rgba(255,255,255,0.12)":"transparent",color:tab===t.id?"#fff":"#94a3b8",width:"100%",textAlign:"left",transition:"background .15s"}}>
+            <t.Icon a={tab===t.id}/>
+            <span style={{fontSize:19,fontWeight:600}}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+      <div style={{padding:"10px 10px 16px",borderTop:"1px solid rgba(255,255,255,0.07)",display:"flex",flexDirection:"column",gap:4}}>
+        <button onClick={onBell} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:"none",cursor:"pointer",background:"transparent",color:"#94a3b8",width:"100%",textAlign:"left",position:"relative"}}>
+          <span style={{fontSize:24}}>🔔</span>
+          <span style={{fontSize:18,fontWeight:600}}>알림</span>
+          {alerts.length>0&&<span style={{marginLeft:"auto",fontSize:15,fontWeight:700,background:"#ef4444",color:"#fff",borderRadius:10,padding:"2px 8px"}}>{alerts.length}</span>}
+        </button>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10}}>
+          <div style={{width:11,height:11,borderRadius:"50%",background:saveSt==="saved"?"#22c55e":saveSt==="saving"?"#f59e0b":"#ef4444",flexShrink:0}}/>
+          <span style={{fontSize:16,color:saveSt==="saved"?"#22c55e":saveSt==="saving"?"#f59e0b":"#ef4444",fontWeight:600}}>{saveSt==="saved"?"저장됨":saveSt==="saving"?"저장 중...":"오류"}</span>
+        </div>
+        <button onClick={onExport} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:"none",cursor:"pointer",background:"transparent",color:"#94a3b8",width:"100%",textAlign:"left"}}>
+          <span style={{fontSize:24}}>⬇️</span>
+          <span style={{fontSize:18,fontWeight:600}}>엑셀 내보내기</span>
+        </button>
+        <button onClick={onSettings} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 12px",borderRadius:10,border:"none",cursor:"pointer",background:"transparent",color:"#94a3b8",width:"100%",textAlign:"left",position:"relative"}}>
+          <span style={{fontSize:24}}>⚙️</span>
+          <span style={{fontSize:18,fontWeight:600}}>동기화 설정</span>
+          {sbConn&&<span style={{marginLeft:"auto",width:11,height:11,borderRadius:"50%",background:"#22c55e",flexShrink:0,display:"block"}}/>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WeMet(){
+  const[loaded,setLoaded]       = useState(false);
+  const[tab,setTab]             = useState("people");
+  const[people,setPeople]       = useState(IP);
+  const[groups,setGroups]       = useState(IG);
+  const[connections,setConn]    = useState(IC);
+  const[meetings,setMeetings]   = useState(IM);
+  const[orgs,setOrgs]           = useState(IORGS);
+  const[locations,setLocations] = useState(ILOCS);
+  const[modal,setModal]         = useState(null);
+  const[saveSt,setSaveSt]       = useState("saved");
+  const[notifOpen,setNotifOpen] = useState(false);
+  const[notifPerm,setNotifPerm] = useState(()=>"Notification" in window?Notification.permission:"denied");
+  const saveTimer = useRef(null);
+  const wide      = useWide();
+  const sbConn    = !!localStorage.getItem("sb-url");
+
+  useEffect(()=>{
+    const load=async()=>{
+      try{
+        const keys=["crm-people","crm-groups","crm-connections","crm-meetings","crm-orgs","crm-locations"];
+        const res=await Promise.all(keys.map(k=>storage.get(k).catch(()=>null)));
+        if(res[0]?.value)setPeople(JSON.parse(res[0].value));
+        if(res[1]?.value)setGroups(JSON.parse(res[1].value));
+        if(res[2]?.value)setConn(JSON.parse(res[2].value));
+        if(res[3]?.value)setMeetings(JSON.parse(res[3].value));
+        if(res[4]?.value)setOrgs(JSON.parse(res[4].value));
+        if(res[5]?.value)setLocations(JSON.parse(res[5].value));
+      }catch(e){}
+      setLoaded(true);
+    };
+    load();
+  },[]);
+
+  useEffect(()=>{if(loaded)fireNotifs(meetings);},[loaded]);
+
+  // ── 실시간 동기화: 30초 폴링 + 탭 포커스 시 즉시 재로드 ──
+  // ✅ FIX: modal 열려있으면 sync skip (타이핑 중 글자 날아감 방지)
+  useEffect(()=>{
+    if(!loaded||!getSB())return;
+    const sync=async()=>{
+      if(modal) return; // 모달 입력 중 폴링 차단
+      try{
+        const keys=["crm-people","crm-groups","crm-connections","crm-meetings","crm-orgs","crm-locations"];
+        const res=await Promise.all(keys.map(k=>storage.get(k).catch(()=>null)));
+        if(res[0]?.value)setPeople(JSON.parse(res[0].value));
+        if(res[1]?.value)setGroups(JSON.parse(res[1].value));
+        if(res[2]?.value)setConn(JSON.parse(res[2].value));
+        if(res[3]?.value)setMeetings(JSON.parse(res[3].value));
+        if(res[4]?.value)setOrgs(JSON.parse(res[4].value));
+        if(res[5]?.value)setLocations(JSON.parse(res[5].value));
+      }catch(e){}
+    };
+    const onVis=()=>{if(document.visibilityState==="visible")sync();};
+    document.addEventListener("visibilitychange",onVis);
+    const t=setInterval(sync,30000);
+    return()=>{document.removeEventListener("visibilitychange",onVis);clearInterval(t);};
+  },[loaded,modal]);
+
+  useEffect(()=>{
+    if(!loaded)return;
+    setSaveSt("saving");
+    clearTimeout(saveTimer.current);
+    saveTimer.current=setTimeout(async()=>{
+      try{
+        const keys=["crm-people","crm-groups","crm-connections","crm-meetings","crm-orgs","crm-locations"];
+        const vals=[people,groups,connections,meetings,orgs,locations];
+        await Promise.all(keys.map((k,i)=>storage.set(k,JSON.stringify(vals[i]))));
+        setSaveSt("saved");
+      }catch(e){setSaveSt("error");}
+    },700);
+  },[people,groups,connections,meetings,orgs,locations]);
+
+  const gp=(id)=>(people||[]).find(p=>p.id===id);
+  const gg=(id)=>(groups||[]).find(g=>g.id===id);
+  const close=()=>setModal(null);
+  const mCount=meetings.filter(m=>m.date.startsWith(new Date().toISOString().slice(0,7))).length;
+  const directCount=people.filter(p=>p.isDirectContact).length;
+  const alerts=getAlerts(meetings);
+  const pushDate=fmtDate(todayStr());
+
+  const handleBell=async()=>{
+    setNotifOpen(o=>!o);
+    if(notifPerm!=="granted"&&"Notification" in window&&Notification.permission!=="denied"){
+      const p=await Notification.requestPermission();setNotifPerm(p);if(p==="granted")await fireNotifs(meetings);
+    }
+  };
+
+  const addOrgIfNew=(v)=>{if(v?.trim()&&!orgs.includes(v.trim()))setOrgs(os=>[v.trim(),...os]);};
+  const addLocation=(v)=>{if(v&&v.trim()&&!(locations||[]).includes(v.trim()))setLocations(ls=>[v.trim(),...ls]);};
+  const mkGroup=(name)=>{const ng={id:"g"+uid(),name,color:PALETTE[groups.length%PALETTE.length],members:[],desc:"",startDate:"",endDate:"",history:[],createdAt:Date.now()};setGroups(gs=>[ng,...gs]);return ng;};
+  const mkPerson=(p)=>{const np={name:p.name,job:p.job||"",dept:"",org:"",contact:"",isDirectContact:true,notes:emptyNotes(),relatedPeople:[],intimacy:3,workImportance:3,groups:[],color:PALETTE[0],id:"p"+uid(),date:todayStr(),createdAt:Date.now(),updatedAt:Date.now()};setPeople(ps=>[np,...ps]);return np;};
+
+  const savePerson=(data)=>{
+    addOrgIfNew(data.org);
+    const ts=Date.now(),pid=data.id||"p"+uid();
+    const fd={...data,id:pid,updatedAt:ts};
+    if(!data.id){fd.date=todayStr();fd.createdAt=ts;}
+    setPeople(ps=>{let upd=data.id?ps.map(x=>x.id===pid?fd:x):[fd,...ps];upd=upd.map(x=>{if(fd.relatedPeople?.includes(x.id)&&!(x.relatedPeople||[]).includes(pid))return{...x,relatedPeople:[...(x.relatedPeople||[]),pid],updatedAt:ts};return x;});return upd;});
+    setGroups(gs=>gs.map(g=>({...g,members:fd.groups.includes(g.id)?[...new Set([...g.members,pid])]:g.members.filter(m=>m!==pid)})));
+    close();
+  };
+  const delPerson=(id)=>{setPeople(ps=>ps.filter(x=>x.id!==id).map(x=>({...x,relatedPeople:(x.relatedPeople||[]).filter(m=>m!==id)})));setConn(cs=>cs.filter(c=>c.from!==id&&c.to!==id));setGroups(gs=>gs.map(g=>({...g,members:(g.members||[]).filter(m=>m!==id)})));setMeetings(ms=>ms.map(m=>({...m,attendees:(m.attendees||[]).filter(a=>a!==id)})));close();};
+  const saveGroup=(data)=>{
+    const gid=data.id||"g"+uid();const fd={...data,id:gid};if(!data.id)fd.createdAt=Date.now();
+    const og=data.id?groups.find(g=>g.id===data.id):null;const om=og?.members||[],nm=data.members||[];
+    if(data.id)setGroups(gs=>gs.map(g=>g.id===data.id?{...g,...fd}:g));else setGroups(gs=>[fd,...gs]);
+    if(data.id){const added=nm.filter(id=>!om.includes(id)),removed=om.filter(id=>!nm.includes(id));if(added.length||removed.length)setPeople(ps=>ps.map(person=>{const pg=person.groups||[];if(added.includes(person.id)&&!pg.includes(gid))return{...person,groups:[...pg,gid]};if(removed.includes(person.id))return{...person,groups:pg.filter(g=>g!==gid)};return person;}));}
+    close();
+  };
+  const delGroup=(id)=>{setGroups(gs=>gs.filter(x=>x.id!==id));setPeople(ps=>ps.map(x=>({...x,groups:(x.groups||[]).filter(g=>g!==id)})));close();};
+  const saveConn=(data)=>{if(data.id)setConn(cs=>cs.map(x=>x.id===data.id?data:x));else setConn(cs=>[{...data,id:"c"+uid(),createdAt:Date.now()},...cs]);close();};
+  const delConn=(id)=>{setConn(cs=>cs.filter(x=>x.id!==id));close();};
+  const saveMeeting=(data)=>{
+    setMeetings(ms=>{const ex=ms.some(x=>x.id===data.id);if(ex)return ms.map(x=>x.id===data.id?data:x);return[{...data,createdAt:data.createdAt||Date.now()},...ms];});
+    close();
+  };
+  const delMeeting=async(id)=>{const m=meetings.find(x=>x.id===id);if(m?.filesMeta?.length)await Promise.all(m.filesMeta.map(fm=>storage.del("crm-file-"+fm.id).catch(()=>{})));setMeetings(ms=>ms.filter(x=>x.id!==id));close();};
+  const exportAll=()=>{
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([...people].sort((a,b)=>b.createdAt-a.createdAt).map(p=>{const lm=[...meetings].filter(m=>m.attendees?.includes(p.id)).sort((a,b)=>b.date.localeCompare(a.date))[0];return{이름:p.name,직함:p.job,부서:p.dept||"",소속:p.org,연락처:p.contact,프로젝트:(p.groups||[]).map(id=>gg(id)?.name||"").join(", "),친밀도:p.intimacy,업무중요도:p.workImportance,마지막미팅:lm?lm.date:""};})),"사람들");
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([...meetings].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>({날짜:m.date,시간:m.time,장소:m.location||"",유형:m.meetingType||"",주제:m.project,참석자:(m.attendees||[]).map(id=>gp(id)?.name||"").join(", "),메모:m.memo,만족도:m.rating,인사이트:m.insights}))),"미팅");
+    XLSX.writeFile(wb,`WeMet_${todayStr()}.xlsx`);
+  };
+
+  const sG=[...groups].sort((a,b)=>b.createdAt-a.createdAt);
+  const sP=[...people].sort((a,b)=>b.createdAt-a.createdAt);
+  const sec=[...sG.map(g=>({id:g.id,label:g.name,color:g.color,members:sP.filter(p=>(p.groups||[]).includes(g.id))})),{id:"none",label:"미분류",color:"#94a3b8",members:sP.filter(p=>(p.groups||[]).length===0)}].filter(s=>s.members.length>0);
+
+  if(!loaded)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",color:"#94a3b8"}}>WeMet 불러오는 중...</div>;
+
+  const newMD=(date)=>({meetingType:"",location:"",date:date||todayStr(),time:"09:00",project:"",relatedProjects:[],attendees:[],memo:"",rating:0,materialsToSend:"",nextContactDate:"",insights:"",nextKeywords:"",filesMeta:[]});
+  const TABS=[{id:"people",label:"People",Icon:IPeopleIcon},{id:"groups",label:"Project",Icon:IProjectIcon},{id:"connections",label:"Connect",Icon:IConnectIcon},{id:"meetings",label:"Meet",Icon:IMeetIcon}];
+  const STATS=[{type:"people",val:people.length,col:"#6366f1"},{type:"project",val:groups.length,col:"#10b981"},{type:"connect",val:directCount+connections.length,col:"#f59e0b"},{type:"meet",val:mCount,col:"#ef4444"}];
+
+  // ✅ FIX: 내부 함수 컴포넌트를 <Comp/> 가 아닌 {Comp()} 호출 방식으로 변경
+  // → WeMet 리렌더 시 React가 새 컴포넌트 타입으로 인식해 unmount/mount 하는 문제 방지
+  // → 결과: 스크롤 위치 보존, 커서 유지, 리렌더 시 DOM 재생성 없음
+
+  const MainContent=()=>(
+    <div>
+      {!sbConn&&<div onClick={()=>setModal({type:"settings"})} style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"8px 14px",marginBottom:12,fontSize:12,color:"#92400e",cursor:"pointer",display:"flex",alignItems:"center",gap:8}}><span>☁️</span><span>지금은 이 기기에만 저장돼요. <b>⚙️ 동기화 설정</b>으로 폰↔컴퓨터 자동 동기화.</span></div>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+        {STATS.map(s=><div key={s.type} style={{background:"#fff",borderRadius:14,padding:"12px 8px",border:"1px solid #e8edf2",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}><div style={{fontSize:26,fontWeight:900,color:s.col,lineHeight:1}}>{s.val}</div><StatIllust type={s.type}/></div>)}
+      </div>
+
+      {tab==="people"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{fontWeight:700,fontSize:15}}>인맥 목록 <span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}>{people.length}명</span></span>
+            <Btn onClick={()=>setModal({type:"person",data:null})}>+ 추가</Btn>
+          </div>
+          {sec.map(s=>(
+            <div key={s.id} style={{marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><div style={{width:7,height:7,borderRadius:"50%",background:s.color,flexShrink:0}}/><span style={{fontWeight:700,fontSize:12,color:s.color}}>{s.label}</span><span style={{fontSize:11,color:"#cbd5e1"}}>{s.members.length}명</span><div style={{flex:1,height:1,background:"#e8edf2"}}/></div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:8}}>{s.members.map(p=><PersonCard key={p.id} p={p} groups={groups} onClick={()=>setModal({type:"person",data:p})}/>)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==="groups"&&<ProjectTab sG={sG} people={people} setModal={setModal}/>}
+
+      {tab==="connections"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{fontWeight:700,fontSize:15}}>연결관계 네트워크</span>
+            <Btn onClick={()=>setModal({type:"connection",data:null})}>+ 추가</Btn>
+          </div>
+          <NetworkGraph people={people} connections={connections} groups={groups}/>
+          <div style={{marginTop:10,display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+            {[...connections].sort((a,b)=>b.createdAt-a.createdAt).map(c=>{const fp=c.from==="__me__"?{name:"나",color:"#1e293b"}:gp(c.from);const tp=c.to==="__me__"?{name:"나",color:"#1e293b"}:gp(c.to);return<div key={c.id} onClick={()=>setModal({type:"connection",data:c})} style={{background:"#fff",borderRadius:10,padding:"10px 12px",border:"1px solid #e8edf2",display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}><Av p={fp}/><div style={{flex:1,textAlign:"center"}}><div style={{fontSize:12,color:"#cbd5e1"}}>→</div><div style={{fontSize:10,color:"#64748b"}}>{c.reason}</div></div><Av p={tp}/></div>;})}
+          </div>
+        </div>
+      )}
+
+      {tab==="meetings"&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{fontWeight:700,fontSize:15}}>미팅</span>
+            <Btn onClick={()=>setModal({type:"meeting",data:null})}>+ 추가</Btn>
+          </div>
+          <div style={{zoom:wide?1.8:1}}>
+            <MeetingCalendar meetings={meetings} people={people} onAdd={d=>setModal({type:"meeting",data:newMD(d)})} onEdit={m=>setModal({type:"meeting",data:m})}/>
+          </div>
+          <div style={{zoom:wide?2:1,display:"flex",flexDirection:"column",gap:8}}>
+            {[...meetings].sort((a,b)=>b.date.localeCompare(a.date)).map(m=>{
+              const tc=mtCol(m);
+              return(
+                <div key={m.id} onClick={()=>setModal({type:"meeting",data:m})} style={{background:"#fff",borderRadius:12,padding:"12px 14px",border:"1px solid #e8edf2",cursor:"pointer",display:"flex",gap:12,alignItems:"flex-start",borderLeft:tc?"4px solid "+tc:"1px solid #e8edf2",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                  <div style={{background:tc?tc+"18":"#f1f5f9",borderRadius:9,padding:"7px 10px",textAlign:"center",minWidth:42,flexShrink:0}}>
+                    <div style={{fontSize:9,color:tc||"#94a3b8",fontWeight:600}}>{m.date.slice(5,7)}월</div>
+                    <div style={{fontWeight:800,fontSize:18,lineHeight:1,color:tc||"#1e293b"}}>{m.date.slice(8,10)}</div>
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}}>
+                      <span style={{fontWeight:700,fontSize:13}}>{m.project}</span>
+                      {m.meetingType&&<span style={{fontSize:10,padding:"1px 8px",borderRadius:10,background:tc+"22",color:tc,fontWeight:700}}>{m.meetingType}</span>}
+                      {m.time&&<span style={{fontSize:10,color:"#94a3b8"}}>{m.time}</span>}
+                      {m.location&&<span style={{fontSize:10,color:"#64748b"}}>📍{m.location}</span>}
+                      {m.rating>0&&<span style={{fontSize:10,color:"#f59e0b",letterSpacing:-1}}>{"★".repeat(m.rating)}{"☆".repeat(5-m.rating)}</span>}
+                      {m.nextContactDate&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:10,background:"#fef3c7",color:"#d97706",fontWeight:600}}>📩 {m.nextContactDate}</span>}
+                      {m.filesMeta?.length>0&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:10,background:"#f0f9ff",color:"#0369a1",fontWeight:600}}>📎 {m.filesMeta.length}개</span>}
+                    </div>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.memo}</div>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{(m.attendees||[]).map(id=>{const p=gp(id);return p?<span key={id} style={{fontSize:10,padding:"1px 6px",borderRadius:20,background:p.color+"22",color:p.color,fontWeight:600}}>{p.name}</span>:null;})}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const NotifPanel=()=>notifOpen?(
+    <div style={{position:"fixed",top:0,right:0,bottom:0,width:Math.min(320,window.innerWidth),background:"#fff",boxShadow:"-4px 0 24px rgba(0,0,0,0.15)",zIndex:300,display:"flex",flexDirection:"column"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",borderBottom:"1px solid #f1f5f9"}}>
+        <span style={{fontWeight:700,fontSize:14}}>🔔 미팅 알림</span>
+        <button onClick={()=>setNotifOpen(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#94a3b8",lineHeight:1}}>×</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto"}}>
+        {alerts.length===0?<div style={{padding:"32px 16px",fontSize:13,color:"#94a3b8",textAlign:"center"}}>오늘/내일 예정된 미팅이 없어요</div>:
+          alerts.map(a=>{const m=a.m,tc=mtCol(m)||"#6366f1";const relPrj=(m.relatedProjects||[]).map(id=>{const g=gg(id);return g?g.name:"";}).filter(Boolean).join(", ");const dday=m.date===todayStr()?"당일":"D-1";
+            return(
+              <div key={m.id+a.label} style={{padding:"14px 16px",borderBottom:"1px solid #f8fafc"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:20,background:m.date===todayStr()?"#fef2f2":"#fef9c3",color:m.date===todayStr()?"#ef4444":"#ca8a04"}}>{dday}</span>
+                  <span style={{fontSize:10,color:"#94a3b8"}}>{pushDate} 알림</span>
+                </div>
+                {relPrj&&<div style={{fontSize:11,fontWeight:600,color:tc,marginBottom:3}}>~{relPrj}</div>}
+                <div style={{fontSize:13,fontWeight:700,color:"#1e293b",marginBottom:4}}>{m.project}</div>
+                <div style={{fontSize:11,color:"#64748b",display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <span>📅 {fmtDate(m.date)}</span>{m.time&&<span>🕐 {m.time}</span>}
+                  {m.location&&<span>📍 {m.location}</span>}
+                  {m.meetingType&&<span style={{padding:"1px 6px",borderRadius:10,background:tc+"22",color:tc,fontWeight:600}}>{m.meetingType}</span>}
+                </div>
+              </div>
+            );
+          })
+        }
+      </div>
+      <div style={{padding:"10px 16px",borderTop:"1px solid #f1f5f9",fontSize:10,color:"#94a3b8"}}>{notifPerm==="granted"?"✅ 알림 허용됨 · 앱 실행 시 자동 체크":"⚠️ 알림 권한 미허용"}</div>
+    </div>
+  ):null;
+
+  const Modals=()=>(
+    <>
+      {modal?.type==="settings"   &&<SettingsModal onClose={close}/>}
+      {modal?.type==="person"     &&<PersonModal data={modal.data} groups={groups} orgs={orgs} people={people} meetings={meetings} onSave={savePerson} onDelete={delPerson} onClose={close} onCreateGroup={mkGroup} onCreatePerson={mkPerson}/>}
+      {modal?.type==="group"      &&<ProjectModal data={modal.data} people={people} groups={groups} onSave={saveGroup} onDelete={delGroup} onClose={close}/>}
+      {modal?.type==="connection" &&<ConnModal data={modal.data} people={people} onSave={saveConn} onDelete={delConn} onClose={close}/>}
+      {modal?.type==="meeting"    &&<MeetingModal data={modal.data} people={people} groups={groups} locations={locations} onCreateGroup={mkGroup} onAddLocation={addLocation} onSave={saveMeeting} onDelete={delMeeting} onClose={close}/>}
+    </>
+  );
+
+  // Wide 레이아웃
+  if(wide){
+    return(
+      <div style={{fontFamily:"'Inter',system-ui,sans-serif",display:"flex",height:"100dvh",overflow:"hidden",color:"#1e293b"}}>
+        <Sidebar tab={tab} setTab={setTab} alerts={alerts} saveSt={saveSt} onBell={handleBell} onExport={exportAll} onSettings={()=>setModal({type:"settings"})} sbConn={sbConn}/>
+        <div style={{flex:1,overflowY:"auto",background:"#f0f2f5"}}>
+          <div style={{padding:"20px 24px",maxWidth:1200,margin:"0 auto"}}>
+            {MainContent()}
+          </div>
+        </div>
+        {NotifPanel()}
+        {Modals()}
+      </div>
+    );
+  }
+
+  // 모바일 레이아웃
+  return(
+    <div style={{fontFamily:"'Inter',system-ui,sans-serif",background:"#f0f2f5",minHeight:"100dvh",color:"#1e293b"}}>
+      <div style={{background:"#fff",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 12px rgba(0,0,0,0.07)"}}>
+        <div style={{textAlign:"center",padding:"3px 0",borderBottom:"1px solid #f1f5f9"}}>
+          <span style={{fontWeight:900,fontSize:10,color:"#22c55e",letterSpacing:3}}>WEMET</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",padding:"3px 10px",gap:6}}>
+          <div style={{display:"flex",flex:1,background:"#f8fafc",borderRadius:12,padding:3,gap:1,minWidth:0}}>
+            {TABS.map(t=><TabBtn key={t.id} label={t.label} active={tab===t.id} onClick={()=>setTab(t.id)} Icon={t.Icon}/>)}
+          </div>
+          <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center"}}>
+            <button onClick={handleBell} style={{width:34,height:34,borderRadius:9,background:"#f8fafc",border:"1px solid #e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:14,position:"relative",flexShrink:0}}>
+              🔔{alerts.length>0&&<span style={{position:"absolute",top:3,right:3,width:13,height:13,borderRadius:"50%",background:"#ef4444",color:"#fff",fontSize:8,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{alerts.length}</span>}
+            </button>
+            <div style={{width:34,height:34,borderRadius:9,background:saveSt==="saved"?"#22c55e":saveSt==="saving"?"#f59e0b":"#ef4444",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <span style={{fontSize:15,color:"#fff"}}>{saveSt==="saved"?"✓":saveSt==="saving"?"⟳":"!"}</span>
+            </div>
+            <div onClick={exportAll} style={{width:34,height:34,borderRadius:9,background:"#22c55e",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+              <span style={{fontSize:15,color:"#fff"}}>⬇</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style={{padding:"12px 12px 80px"}}>
+        {MainContent()}
+      </div>
+      <button onClick={()=>setModal({type:"settings"})} style={{position:"fixed",bottom:24,right:20,width:48,height:48,borderRadius:"50%",background:"#fff",border:"1px solid #e2e8f0",boxShadow:"0 4px 16px rgba(0,0,0,0.12)",cursor:"pointer",fontSize:22,display:"flex",alignItems:"center",justifyContent:"center",zIndex:90}}>
+        ⚙️{sbConn&&<span style={{position:"absolute",top:4,right:4,width:8,height:8,borderRadius:"50%",background:"#22c55e",border:"2px solid #fff"}}/>}
+      </button>
+      {NotifPanel()}
+      {Modals()}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<WeMet/>);
+</script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('/sw.js').then(r=>console.log('SW:',r.scope)).catch(e=>console.warn('SW 실패:',e));
+  });
+}
+</script>
+</body>
+</html>
