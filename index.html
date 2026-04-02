@@ -80,7 +80,7 @@ const ILOCS=["카카오 본사","회사 회의실","스타벅스 강남점"];
 const getSB=()=>{const u=localStorage.getItem("sb-url"),k=localStorage.getItem("sb-key");return u&&k?{url:u,key:k}:null;};
 const sbH=(k)=>({"apikey":k,"Authorization":"Bearer "+k,"Content-Type":"application/json"});
 const storage={
-  get:async(k)=>{const sb=getSB();if(sb){try{const r=await fetch(sb.url+"/rest/v1/kv_store?key=eq."+encodeURIComponent(k)+"&select=value",{headers:sbH(sb.key),cache:"no-store"});const d=await r.json();if(d&&d[0])return{value:d[0].value};}catch(e){}}const v=localStorage.getItem(k);return v?{value:v}:null;},
+  get:async(k)=>{const sb=getSB();if(sb){try{const r=await fetch(sb.url+"/rest/v1/kv_store?key=eq."+encodeURIComponent(k)+"&select=value",{headers:sbH(sb.key)});const d=await r.json();if(d&&d[0])return{value:d[0].value};}catch(e){}}const v=localStorage.getItem(k);return v?{value:v}:null;},
   set:async(k,v)=>{const sb=getSB();if(sb){try{await fetch(sb.url+"/rest/v1/kv_store",{method:"POST",headers:Object.assign({},sbH(sb.key),{"Prefer":"resolution=merge-duplicates"}),body:JSON.stringify({key:k,value:v,updated_at:new Date().toISOString()})});}catch(e){}}localStorage.setItem(k,v);return true;},
   del:async(k)=>{const sb=getSB();if(sb){try{await fetch(sb.url+"/rest/v1/kv_store?key=eq."+encodeURIComponent(k),{method:"DELETE",headers:sbH(sb.key)});}catch(e){}}localStorage.removeItem(k);return true;},
   test:async(url,key)=>{try{const r=await fetch(url+"/rest/v1/kv_store?limit=1",{headers:sbH(key)});return r.ok;}catch(e){return false;}}
@@ -342,12 +342,14 @@ function NetworkGraph({people,connections,groups}){
     groups.forEach(grp=>{const mb=(grp.members||[]).filter(id=>nm[id]);for(let i=0;i<mb.length;i++)for(let j=i+1;j<mb.length;j++){const k=[mb[i],mb[j]].sort().join("_");if(!es.has(k)){es.add(k);links.push({source:nm[mb[i]],target:nm[mb[j]],type:"sp",gc:grp.color});}}});
     people.forEach(p=>{(p.relatedPeople||[]).forEach(mid=>{const k=[p.id,mid].sort().join("_");if(!es.has(k)&&nm[p.id]&&nm[mid]){es.add(k);links.push({source:nm[p.id],target:nm[mid],type:"rel"});}});});
     pN.forEach(p=>{const k=["__me__",p.id].sort().join("_");if(!es.has(k)){es.add(k);links.push({source:me,target:p,type:p.isDirectContact?"dc":"rad",iv:p.intimacy||3});}});
+    const orgMap={};pN.forEach(p=>{if(p.org&&p.org.trim()){const o=p.org.trim();if(!orgMap[o])orgMap[o]=[];orgMap[o].push(p.id);}});Object.values(orgMap).forEach(ids=>{for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++){const k=[ids[i],ids[j]].sort().join("_");if(!es.has(k)&&nm[ids[i]]&&nm[ids[j]]){es.add(k);links.push({source:nm[ids[i]],target:nm[ids[j]],type:"org"});}}});
     svg.append("defs").append("marker").attr("id","arr").attr("viewBox","0 -5 10 10").attr("refX",28).attr("markerWidth",5).attr("markerHeight",5).attr("orient","auto").append("path").attr("d","M0,-5L10,0L0,5").attr("fill","#475569");
     const g=svg.append("g");svg.call(d3.zoom().scaleExtent([0.1,4]).on("zoom",e=>g.attr("transform",e.transform)));
     const sim=d3.forceSimulation(nodes).force("link",d3.forceLink(links).distance(d=>{if(d.type==="rad")return 280-((d.iv||3)-1)*36;if(d.type==="dc")return 200-((d.iv||3)-1)*30;if(d.type==="meEx")return 140;if(d.type==="ex")return 120;return 90;}).strength(d=>{if(d.type==="rad")return 0.25;if(d.type==="dc")return 0.4;if(d.type==="meEx")return 0.8;if(d.type==="ex")return 0.7;return 0.3;})).force("charge",d3.forceManyBody().strength(-280)).force("collide",d3.forceCollide(d=>nR(d)+18));
     const rEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="rad")).enter().append("line").attr("stroke",d=>d.target.color||"#94a3b8").attr("stroke-width",d=>(d.iv||3)*0.4+0.4).attr("stroke-opacity",0.2);
     const dcEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="dc")).enter().append("line").attr("stroke",d=>d.target.color||"#f59e0b").attr("stroke-width",d=>(d.iv||3)*0.6+1.2).attr("stroke-opacity",0.75);
     const spEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="sp")).enter().append("line").attr("stroke",d=>d.gc||"#94a3b8").attr("stroke-width",1.2).attr("stroke-dasharray","4,4").attr("stroke-opacity",0.5);
+    const orgEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="org")).enter().append("line").attr("stroke","#cbd5e1").attr("stroke-width",1).attr("stroke-dasharray","2,5").attr("stroke-opacity",0.4);
     const rlEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="rel")).enter().append("line").attr("stroke","#cbd5e1").attr("stroke-width",1).attr("stroke-dasharray","3,4");
     const mxEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="meEx")).enter().append("line").attr("stroke","#6366f1").attr("stroke-width",2.2).attr("marker-end","url(#arr)");
     const exEl=g.append("g").selectAll("line").data(links.filter(l=>l.type==="ex")).enter().append("line").attr("stroke","#94a3b8").attr("stroke-width",1.5).attr("stroke-dasharray","5,4").attr("marker-end","url(#arr)");
@@ -361,14 +363,14 @@ function NetworkGraph({people,connections,groups}){
     nG.filter(d=>!d.isMe).append("text").attr("dy",d=>`${nR(d)+13}px`).attr("text-anchor","middle").attr("fill","#334155").attr("font-weight",600).attr("font-size",10).text(d=>d.name);
     nG.filter(d=>!d.isMe).append("text").attr("dy",d=>`${nR(d)+24}px`).attr("text-anchor","middle").attr("fill","#94a3b8").attr("font-size",8).text(d=>fmtYYMM(d.updatedAt||d.createdAt));
     const upd=(el)=>el.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
-    sim.on("tick",()=>{upd(rEl);upd(dcEl);upd(spEl);upd(rlEl);upd(mxEl);upd(exEl);lTxt.attr("x",d=>(d.source.x+d.target.x)/2).attr("y",d=>(d.source.y+d.target.y)/2-8);nG.attr("transform",d=>`translate(${d.x},${d.y})`);});
+    sim.on("tick",()=>{upd(rEl);upd(dcEl);upd(spEl);upd(orgEl);upd(rlEl);upd(mxEl);upd(exEl);lTxt.attr("x",d=>(d.source.x+d.target.x)/2).attr("y",d=>(d.source.y+d.target.y)/2-8);nG.attr("transform",d=>`translate(${d.x},${d.y})`);});
     return()=>sim.stop();
   },[people,connections,groups]);
   return(
     <div style={{borderRadius:12,overflow:"hidden",border:"1px solid #e2e8f0",background:"#fafbfc"}}>
       <svg ref={ref} style={{display:"block",width:"100%",minHeight:560}}/>
       <div style={{padding:"6px 14px",fontSize:10,color:"#94a3b8",borderTop:"1px solid #f1f5f9",background:"#fff",display:"flex",gap:12,flexWrap:"wrap"}}>
-        <span>🖱️ 드래그·줌</span><span style={{fontWeight:600}}>━ 직접관계</span><span style={{color:"#6366f1",fontWeight:600}}>━ 명시연결</span><span>┄ 같은 프로젝트</span>
+        <span>🖱️ 드래그·줌</span><span style={{fontWeight:600}}>━ 직접관계</span><span style={{color:"#6366f1",fontWeight:600}}>━ 명시연결</span><span>┄ 같은 프로젝트</span><span style={{color:"#cbd5e1"}}>┈ 같은 소속</span>
       </div>
     </div>
   );
